@@ -23,10 +23,13 @@ Responses API note:
 """
 
 import os
+import re
+import time
 
 from openai import OpenAI
 
-from base_agent import OpenAICompatibleAgent
+from base_agent import OpenAICompatibleAgent, _empty_stats
+from search_tool import get_system_prompt, MAX_TOKENS, is_verbose
 
 # Pinned model versions:
 #   "kimi-k2.5"              — latest, 256k context (recommended)
@@ -65,6 +68,113 @@ class KimiAgent(OpenAICompatibleAgent):
             base_url="https://api.moonshot.ai/v1",
         )
         super().__init__(client=client, model=model)
+
+
+    def run_native_search(
+        self,
+        question: str,
+        system_prompt: str = None,
+        on_progress=None,
+    ) -> dict:
+        """Run a query using Kimi's built-in $web_search tool (no You.com).
+
+        Kimi's built-in search uses a manual tool-use loop — the API executes
+        the search internally but requires the client to echo arguments back as
+        the tool result to complete the agentic loop. Thinking must be disabled.
+        URLs are extracted from the final answer text (not returned via API).
+        """
+        prompt = system_prompt or get_system_prompt()
+        stats = _empty_stats(self.model)
+        stats["interface"] = "native_responses"
+        verbose = is_verbose()
+
+        def _notify(msg):
+            if verbose:
+                print(f"  [Native] {msg}")
+            if on_progress:
+                on_progress(msg)
+
+        kimi_tool = [{"type": "builtin_function", "function": {"name": "$web_search"}}]
+        messages = [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": question},
+        ]
+        t0 = time.perf_counter()
+        baseline_input = 0
+        choice = None
+
+        def _elapsed():
+            return f"{(time.perf_counter() - t0):.1f}s"
+
+        _notify(f"Starting request... ({_elapsed()})")
+
+        from search_tool import MAX_TOOL_ROUNDS
+        for round_num in range(MAX_TOOL_ROUNDS):
+            _notify(f"LLM round {round_num + 1}... ({_elapsed()})")
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                tools=kimi_tool,
+                max_completion_tokens=MAX_TOKENS,
+                extra_body={"thinking": {"type": "disabled"}},
+            )
+
+            if response.usage:
+                call_input = getattr(response.usage, "prompt_tokens", 0)
+                call_output = getattr(response.usage, "completion_tokens", 0)
+            else:
+                call_input = call_output = 0
+
+            stats["token_breakdown"]["input"] += call_input
+            stats["token_breakdown"]["output"] += call_output
+            stats["api_calls"] += 1
+
+            if round_num == 0:
+                baseline_input = call_input
+                stats["model_confirmed"] = getattr(response, "model", None)
+
+            choice = response.choices[0] if response.choices else None
+
+            if not choice or choice.finish_reason != "tool_calls" or not (choice.message and choice.message.tool_calls):
+                break
+
+            messages.append(choice.message)
+
+            for tool_call in choice.message.tool_calls:
+                if tool_call.function.name != "$web_search":
+                    continue
+                stats["search_calls"] += 1
+                raw_args = tool_call.function.arguments
+                _notify(f"Search {stats['search_calls']}: round {round_num + 1} ({_elapsed()})")
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": raw_args,
+                })
+
+        _notify(f"Generating answer... ({_elapsed()})")
+
+        stats["latency_ms"] = (time.perf_counter() - t0) * 1000
+        stats["tokens_used"] = stats["token_breakdown"]["input"] + stats["token_breakdown"]["output"]
+
+        if stats["api_calls"] > 1:
+            stats["token_breakdown"]["search_context"] = max(
+                0, stats["token_breakdown"]["input"] - baseline_input * stats["api_calls"]
+            )
+
+        stats["answer"] = choice.message.content if choice and choice.message else ""
+
+        # Kimi does not expose source URLs via the API — extract from answer text.
+        seen = set()
+        for url in re.findall(r'https?://[^\s\)\]"\'<>]+', stats["answer"]):
+            url = url.rstrip('.,;:')
+            if url not in seen:
+                seen.add(url)
+                stats["sources"].append(url)
+
+        _notify(f"Complete — {stats['latency_ms']:.0f}ms total ({_elapsed()})")
+        return stats
 
 
 if __name__ == "__main__":

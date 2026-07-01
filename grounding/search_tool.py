@@ -378,6 +378,36 @@ def execute_search(
     return header + "\n\n" + "\n\n---\n\n".join(parts)
 
 
+# ─── Citation injection helpers ──────────────────────────────────────────────
+# Used by native search methods on agent classes to embed [N] markers in answers.
+# Shared here so agent files don't depend on compare.py.
+
+def inject_citations_at_positions(text: str, insertions: dict) -> str:
+    """Insert [N] citation markers into text at the given char end-positions.
+
+    insertions: dict mapping char index → list of citation numbers to insert.
+    Providers that return character-offset annotations (Anthropic, OpenAI) use this
+    to embed inline citations before returning the answer to callers.
+    """
+    if not insertions:
+        return text
+    result_chars = []
+    for i, ch in enumerate(text):
+        result_chars.append(ch)
+        if i + 1 in insertions:
+            nums = sorted(insertions[i + 1])
+            result_chars.append("".join(f"[{n}]" for n in nums))
+    return "".join(result_chars)
+
+
+def inject_citations(text: str, sources: list) -> str:
+    """Replace [N] citation markers with markdown links to source URLs."""
+    import re
+    for i, url in enumerate(sources, 1):
+        text = re.sub(rf'\[{i}\]', f'[[{i}]]({url})', text)
+    return text
+
+
 # ─── Quick self-test ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

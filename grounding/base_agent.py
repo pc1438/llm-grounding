@@ -72,12 +72,28 @@ logger = logging.getLogger(__name__)
 # ─── Shared utilities ─────────────────────────────────────────────────────────
 
 def _empty_stats(model: str = "") -> dict:
-    """Return a fresh stats dict. All loop implementations use this shape."""
+    """Return a fresh stats dict. All loop implementations use this shape.
+
+    Fields:
+        answer           — final answer text (with [N] citation markers if applicable)
+        sources          — ordered list of source URLs cited in the answer
+        tool_calls       — YDC search log entries (empty for native search paths)
+        model            — model ID as configured by the caller
+        model_confirmed  — model ID as confirmed by the API response (may differ)
+        interface        — which search integration was used: "ydc", "native_responses",
+                           "native_chat", or the INTEGRATION_INTERFACE constant
+        tokens_used      — total tokens (input + output)
+        token_breakdown  — per-category breakdown: input, output, search_context
+        search_calls     — number of search round-trips executed
+        api_calls        — number of LLM API calls made
+        latency_ms       — wall-clock time from first request to final answer
+    """
     return {
         "answer": "",
         "sources": [],
         "tool_calls": [],
         "model": model,
+        "model_confirmed": None,
         "interface": INTEGRATION_INTERFACE,
         "tokens_used": 0,
         "token_breakdown": {"input": 0, "output": 0, "search_context": 0},

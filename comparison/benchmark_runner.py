@@ -76,14 +76,29 @@ def _run_with_retry(fn, *args, **kwargs):
 
 QUESTIONS_FILE = Path(__file__).parent / "benchmark_questions_50.json"
 
-def _default_output_path(provider: str = "claude", force_chat_completions: bool = False) -> Path:
-    """Generate a timestamped output filename including model name and API path."""
+VALID_PATHS = {"ydc", "responses", "chat"}
+PATH_ALIASES = {"native": "responses"}  # "native" is an alias for "responses"
+
+def _normalize_paths(paths_arg: str) -> list[str]:
+    """Parse and validate the --paths argument. Returns a deduplicated list."""
+    raw = [p.strip().lower() for p in paths_arg.split(",") if p.strip()]
+    resolved = [PATH_ALIASES.get(p, p) for p in raw]
+    seen, ordered = set(), []
+    for p in resolved:
+        if p not in VALID_PATHS:
+            raise ValueError(f"Unknown path: {p!r}. Valid options: {', '.join(sorted(VALID_PATHS))} (or 'native' as alias for 'responses')")
+        if p not in seen:
+            seen.add(p)
+            ordered.append(p)
+    return ordered
+
+
+def _default_output_path(provider: str = "claude", paths: list[str] = None) -> Path:
+    """Generate a timestamped output filename including model name and paths."""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     model_name = MODELS[provider]["model"].replace(".", "_")  # e.g. gpt-5.4 → gpt-5_4
-    # Include _chat_completions_ in filename when using the legacy path so
-    # benchmark output files for the two API paths don't collide.
-    suffix = "_chat_completions_" if force_chat_completions else "_"
-    return Path(__file__).parent / f"benchmark_results_{model_name}{suffix}{ts}.json"
+    paths_tag = "_".join(paths or ["ydc", "responses"])
+    return Path(__file__).parent / f"benchmark_results_{model_name}_{paths_tag}_{ts}.json"
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -169,25 +184,32 @@ def stats_to_record(stats: dict) -> dict:
 def compute_cost(stats: dict, model_config: dict, path_type: str) -> dict:
     """Compute cost breakdown for a single path result.
 
-    NOTE: compare.py has calculate_costs() / calculate_native_costs() covering
-    similar logic but split by path type and using different output key names
-    ("llm"/"search"/"total" vs "llm_cost"/"search_cost"/"total_cost"). The
-    functions are intentionally separate; unify them if the key naming is ever
-    aligned across both modules.
+    Livecrawl overage (ydc path only): first 10 URLs per call are included in
+    the base $5/1k rate; additional URLs charged at $1/1,000 URLs on the count
+    parameter (URLs requested, not returned).
     """
     llm_cost = (
         stats["input_tokens"] * model_config["input_cost_per_m"] / 1_000_000 +
         stats["output_tokens"] * model_config["output_cost_per_m"] / 1_000_000
     )
-    if path_type == "youdotcom":
+    if path_type == "ydc":
         search_cost = stats.get("search_calls", 0) * (model_config.get("ydc_search_cost_per_call") or 0)
+        # Livecrawl overage: $1/1000 URLs above first 10 per call
+        livecrawl_overage = 0.0
+        for call in stats.get("tool_calls", []):
+            if call.get("livecrawl"):
+                excess = max(0, call.get("count", 5) - 10)
+                livecrawl_overage += excess * 0.001
     else:
         search_cost = stats.get("search_calls", 0) * (model_config.get("native_search_cost_per_call") or 0)
+        livecrawl_overage = 0.0
 
+    total = llm_cost + search_cost + livecrawl_overage
     return {
         "llm_cost": round(llm_cost, 6),
         "search_cost": round(search_cost, 6),
-        "total_cost": round(llm_cost + search_cost, 6),
+        "livecrawl_overage": round(livecrawl_overage, 6),
+        "total_cost": round(total, 6),
     }
 
 
@@ -202,20 +224,27 @@ def run_benchmark(
     keep_answers: bool = False,
     limit: int = 0,
     force_chat_completions: bool = False,
+    paths: list[str] = None,
+    fresh: bool = False,
 ):
-    """Run the full 50-question benchmark.
+    """Run the 50-question benchmark for the specified paths.
 
     Args:
-        force_chat_completions: Pass to run_youdotcom() to use the legacy
-                                chat.completions path for GPT/Qwen instead of
-                                the default Responses API. Output filename will
-                                include '_chat_completions_' suffix so results
-                                from both API paths can coexist in the same dir.
-                                Has no effect on claude or kimi.
-                                CLI flag: --chat-completions
+        paths: Which search paths to benchmark. Any combination of:
+               "ydc"       — LLM + You.com Search
+               "responses" — LLM + native search via Responses API  (alias: "native")
+               "chat"      — LLM + native search via chat.completions
+               Default: ["ydc", "responses"] (backward compatible).
+        fresh: Ignore any existing partial run and start clean.
+        force_chat_completions: Deprecated — use paths=["ydc","chat"] instead.
+                                Retained for backward compatibility.
     """
+    if paths is None:
+        # Backward compat: --chat-completions used to mean chat path for YDC loop,
+        # not for native. Keep old behavior (just changes YDC's API shape, not paths).
+        paths = ["ydc", "responses"]
     if output_path is None:
-        output_path = _default_output_path(provider, force_chat_completions)
+        output_path = _default_output_path(provider, paths)
 
     if verbose:
         os.environ["GROUNDING_VERBOSE"] = "1"
@@ -225,7 +254,7 @@ def run_benchmark(
     results = load_existing_results(output_path)
 
     # Find or create a run
-    active_run = find_active_run(results)
+    active_run = None if fresh else find_active_run(results)
 
     if active_run:
         run_id = active_run["run_id"]
@@ -240,6 +269,7 @@ def run_benchmark(
             "run_id": run_id,
             "provider": provider,
             "model": model_config["model"],
+            "paths": paths,
             "native_search_config": describe_native_search(model_config),
             "judge_model": model_config["judge"] if not skip_judge else None,
             "started_at": datetime.now(timezone.utc).isoformat(),
@@ -261,6 +291,7 @@ def run_benchmark(
         print(f"  Limiting to first {limit} questions")
 
     print(f"  Provider: {provider} ({model_config['model']})")
+    print(f"  Paths:    {', '.join(paths)}")
     print(f"  Native:   {describe_native_search(model_config)}")
     print(f"  Judge:    {'OFF' if skip_judge else model_config['judge']}")
     print(f"  Output:   {output_path}")
@@ -305,84 +336,94 @@ def run_benchmark(
             "status": "pending",
         }
 
-        # ── You.com path ──
-        try:
-            print(f"  Running You.com path...")
-            t0 = time.perf_counter()
-            ydc_stats = _run_with_retry(run_youdotcom, question["query"], client, model_config,
-                                       force_chat_completions=force_chat_completions)
-            elapsed = time.perf_counter() - t0
-            print(f"  ✓ You.com done — {ydc_stats['total_tokens']:,} tokens, "
-                  f"{ydc_stats['search_calls']} searches, {elapsed:.1f}s")
+        # ── Run each requested path ──
+        path_stats = {}  # path_key → stats dict (or None on failure)
 
-            result_entry["youdotcom"] = stats_to_record(ydc_stats)
-            result_entry["youdotcom"]["cost"] = compute_cost(ydc_stats, model_config, "youdotcom")
-        except Exception as e:
-            print(f"  ✗ You.com FAILED: {e}")
-            if verbose:
-                traceback.print_exc()
-            result_entry["youdotcom"] = {"error": str(e)}
-            result_entry["status"] = "partial_error"
-            ydc_stats = None
-
-        # ── Native path ──
-        try:
-            print(f"  Running Native path...")
-            t0 = time.perf_counter()
-            native_stats = _run_with_retry(run_native, question["query"], client, model_config)
-            elapsed = time.perf_counter() - t0
-            print(f"  ✓ Native done — {native_stats['total_tokens']:,} tokens, "
-                  f"{native_stats['search_calls']} searches, {elapsed:.1f}s")
-
-            result_entry["native"] = stats_to_record(native_stats)
-            result_entry["native"]["cost"] = compute_cost(native_stats, model_config, "native")
-        except Exception as e:
-            print(f"  ✗ Native FAILED: {e}")
-            if verbose:
-                traceback.print_exc()
-            result_entry["native"] = {"error": str(e)}
-            if result_entry["status"] != "partial_error":
-                result_entry["status"] = "partial_error"
-            native_stats = None
-
-        # ── Judge ──
-        if not skip_judge and ydc_stats and native_stats:
+        for path_key in paths:
             try:
-                judge_model = model_config["judge"]
-                print(f"  Running judge ({judge_model})...")
-                t0 = time.perf_counter()
-                judge_result = _run_with_retry(
-                    run_judge,
-                    question["query"],
-                    ydc_stats["answer"],
-                    native_stats["answer"],
-                    judge_model,
-                    sources_ydc=ydc_stats.get("sources", []),
-                    sources_native=native_stats.get("sources", []),
-                )
-                elapsed = time.perf_counter() - t0
-
-                if judge_result.get("error"):
-                    print(f"  ⚠ Judge error: {judge_result['error']}")
-                    result_entry["judge"] = judge_result
+                if path_key == "ydc":
+                    label = "You.com"
+                    print(f"  Running {label} path...")
+                    t0 = time.perf_counter()
+                    stats = _run_with_retry(run_youdotcom, question["query"], client, model_config,
+                                           force_chat_completions=force_chat_completions)
+                    elapsed = time.perf_counter() - t0
+                    cost_type = "ydc"
                 else:
-                    verdict = judge_result.get("verdict", "?")
-                    ydc_score = sum(judge_result.get("youdotcom_scores", {}).get(d, 0)
-                                    for d in ["completeness", "relevance", "specificity", "citation_quality"])
-                    nat_score = sum(judge_result.get("native_scores", {}).get(d, 0)
-                                    for d in ["completeness", "relevance", "specificity", "citation_quality"])
-                    print(f"  ✓ Judge done — You.com: {ydc_score}/20, Native: {nat_score}/20, "
-                          f"Verdict: {verdict} ({elapsed:.1f}s)")
-                    result_entry["judge"] = judge_result
+                    label = f"Native ({path_key})"
+                    print(f"  Running {label} path...")
+                    t0 = time.perf_counter()
+                    stats = _run_with_retry(run_native, question["query"], client, model_config,
+                                           native_path=path_key)
+                    elapsed = time.perf_counter() - t0
+                    cost_type = path_key
+
+                print(f"  ✓ {label} done — {stats['total_tokens']:,} tokens, "
+                      f"{stats['search_calls']} searches, {elapsed:.1f}s")
+                record = stats_to_record(stats)
+                record["cost"] = compute_cost(stats, model_config, cost_type)
+                result_entry[path_key] = record
+                path_stats[path_key] = stats
+
             except Exception as e:
-                print(f"  ✗ Judge FAILED: {e}")
+                print(f"  ✗ {path_key} FAILED: {e}")
                 if verbose:
                     traceback.print_exc()
-                result_entry["judge"] = {"error": str(e)}
-        elif skip_judge:
+                result_entry[path_key] = {"error": str(e)}
+                if result_entry["status"] != "partial_error":
+                    result_entry["status"] = "partial_error"
+                path_stats[path_key] = None
+
+        # ── Judge: ydc vs each other path ──
+        ydc_stats = path_stats.get("ydc")
+        judge_results = {}
+
+        if not skip_judge and ydc_stats:
+            judge_model = model_config.get("judge")
+            if judge_model:
+                for path_key in paths:
+                    if path_key == "ydc":
+                        continue
+                    other_stats = path_stats.get(path_key)
+                    if not other_stats:
+                        judge_results[f"ydc_vs_{path_key}"] = {"error": f"{path_key} path failed — skipped"}
+                        continue
+                    try:
+                        print(f"  Running judge ({judge_model}): ydc vs {path_key}...")
+                        t0 = time.perf_counter()
+                        judge_result = _run_with_retry(
+                            run_judge,
+                            question["query"],
+                            ydc_stats["answer"],
+                            other_stats["answer"],
+                            judge_model,
+                            sources_ydc=ydc_stats.get("sources", []),
+                            sources_native=other_stats.get("sources", []),
+                        )
+                        elapsed = time.perf_counter() - t0
+                        if judge_result.get("error"):
+                            print(f"  ⚠ Judge error: {judge_result['error']}")
+                        else:
+                            verdict = judge_result.get("verdict", "?")
+                            ydc_score = sum(judge_result.get("youdotcom_scores", {}).get(d, 0)
+                                            for d in ["completeness", "relevance", "specificity", "citation_quality"])
+                            nat_score = sum(judge_result.get("native_scores", {}).get(d, 0)
+                                            for d in ["completeness", "relevance", "specificity", "citation_quality"])
+                            print(f"  ✓ Judge done — YDC: {ydc_score}/20, {path_key}: {nat_score}/20, "
+                                  f"Verdict: {verdict} ({elapsed:.1f}s)")
+                        judge_results[f"ydc_vs_{path_key}"] = judge_result
+                    except Exception as e:
+                        print(f"  ✗ Judge (ydc vs {path_key}) FAILED: {e}")
+                        if verbose:
+                            traceback.print_exc()
+                        judge_results[f"ydc_vs_{path_key}"] = {"error": str(e)}
+
+        if skip_judge:
             result_entry["judge"] = {"skipped": True}
+        elif not judge_results:
+            result_entry["judge"] = {"error": "Skipped — ydc path not run or no judge configured"}
         else:
-            result_entry["judge"] = {"error": "Skipped — one or both paths failed"}
+            result_entry["judge"] = judge_results
 
         # Mark status
         if result_entry["status"] == "pending":
@@ -391,26 +432,22 @@ def run_benchmark(
             result_entry["status"] = "failed"
             errors += 1
 
-        # Compute per-query cost_saved_pct for the one-pager table
-        ydc_cost_val = result_entry.get("youdotcom", {}).get("cost", {}).get("total_cost", 0)
-        nat_cost_val = result_entry.get("native", {}).get("cost", {}).get("total_cost", 0)
-        if nat_cost_val > 0:
-            result_entry["cost_saved_pct"] = round((1 - ydc_cost_val / nat_cost_val) * 100, 1)
-        else:
-            result_entry["cost_saved_pct"] = 0
-
-        # Compute per-query token_saved_pct
-        ydc_tok = result_entry.get("youdotcom", {}).get("total_tokens", 0)
-        nat_tok = result_entry.get("native", {}).get("total_tokens", 0)
-        if nat_tok > 0:
-            result_entry["token_saved_pct"] = round((1 - ydc_tok / nat_tok) * 100, 1)
-        else:
-            result_entry["token_saved_pct"] = 0
+        # Compute per-query savings (ydc vs each other path)
+        ydc_cost_val = result_entry.get("ydc", {}).get("cost", {}).get("total_cost", 0)
+        ydc_tok = result_entry.get("ydc", {}).get("total_tokens", 0)
+        for path_key in paths:
+            if path_key == "ydc":
+                continue
+            nat_cost_val = result_entry.get(path_key, {}).get("cost", {}).get("total_cost", 0)
+            nat_tok = result_entry.get(path_key, {}).get("total_tokens", 0)
+            result_entry.setdefault("savings", {})[f"ydc_vs_{path_key}"] = {
+                "cost_saved_pct": round((1 - ydc_cost_val / nat_cost_val) * 100, 1) if nat_cost_val > 0 else 0,
+                "token_saved_pct": round((1 - ydc_tok / nat_tok) * 100, 1) if nat_tok > 0 else 0,
+            }
 
         # Strip full answers from saved output to keep file manageable
-        # (keep answer_length for reference; use --keep-answers to retain)
         if not keep_answers:
-            for path_key in ["youdotcom", "native"]:
+            for path_key in paths:
                 if isinstance(result_entry.get(path_key), dict) and "answer" in result_entry[path_key]:
                     del result_entry[path_key]["answer"]
 
@@ -674,13 +711,25 @@ def main():
                         help="Only run first N questions (0 = all)")
     parser.add_argument("--keep-answers", action="store_true",
                         help="Keep full answer text in output file (larger file)")
+    parser.add_argument("--paths", default="ydc,responses",
+                        help="Comma-separated paths to benchmark. Options: ydc, responses (or native), chat. "
+                             "Default: ydc,responses. Example: --paths ydc,responses,chat")
+    parser.add_argument("--fresh", action="store_true",
+                        help="Ignore any existing partial run and start clean.")
     parser.add_argument("--chat-completions", action="store_true",
-                        help="Force legacy chat.completions path for GPT/Qwen (default: Responses API). "
-                             "Output filename will include '_chat_completions_' suffix.")
+                        help="Deprecated. Use --paths ydc,chat instead. "
+                             "Changes YDC loop API shape for GPT/Qwen — does not add chat.completions native path.")
 
     args = parser.parse_args()
     force_cc = getattr(args, "chat_completions", False)
-    output_path = args.output or _default_output_path(args.provider, force_cc)
+
+    try:
+        paths = _normalize_paths(args.paths)
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+    output_path = args.output or _default_output_path(args.provider, paths)
 
     run_benchmark(
         provider=args.provider,
@@ -691,6 +740,8 @@ def main():
         keep_answers=args.keep_answers,
         limit=args.limit,
         force_chat_completions=force_cc,
+        paths=paths,
+        fresh=args.fresh,
     )
 
 

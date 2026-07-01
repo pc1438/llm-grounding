@@ -72,6 +72,10 @@ from search_tool import (
     set_interface,
 )
 from base_agent import AnthropicAgent, OpenAICompatibleAgent, OpenAIResponsesAgent
+from agents.claude_agent import ClaudeAgent
+from agents.openai_agent import OpenAIAgent
+from agents.kimi_agent import KimiAgent
+from agents.qwen_agent import QwenAgent
 
 # ─── Load model config + pricing from single source of truth ──────────────
 # Edit comparison/pricing.json to update rates — this file reads it at startup.
@@ -129,10 +133,14 @@ def describe_native_search(model_config: dict) -> str:
 
 
 def calculate_costs(stats: dict, model_config: dict) -> dict:
-    """Return {"llm", "search", "total"} costs in USD for the You.com path.
+    """Return {"llm", "search", "livecrawl_overage", "total"} costs in USD for the You.com path.
 
     Rates come from pricing.json (via model_config) — nothing is hardcoded here.
     Called by both print_comparison() and server.py so the formula lives once.
+
+    Livecrawl pricing: first 10 URLs per call are included in the base $5/1k rate;
+    additional URLs are charged at $1/1,000 URLs, billed on the count parameter
+    (URLs requested, not returned).
     """
     llm = (
         stats["input_tokens"] * model_config["input_cost_per_m"] / 1_000_000
@@ -140,7 +148,17 @@ def calculate_costs(stats: dict, model_config: dict) -> dict:
     )
     search_cost_per_call = model_config.get("ydc_search_cost_per_call") or 0
     search = stats["search_calls"] * search_cost_per_call
-    return {"llm": llm, "search": search, "total": llm + search}
+
+    # Livecrawl overage: $1 per 1,000 URLs above the first 10 per call
+    livecrawl_overage = 0.0
+    for call in stats.get("tool_calls", []):
+        if call.get("livecrawl"):
+            count = call.get("count", 5)
+            excess = max(0, count - 10)
+            livecrawl_overage += excess * 0.001  # $1/1000 URLs
+
+    total = llm + search + livecrawl_overage
+    return {"llm": llm, "search": search, "livecrawl_overage": livecrawl_overage, "total": total}
 
 
 def calculate_native_costs(stats: dict, model_config: dict) -> dict:
@@ -199,31 +217,6 @@ JUDGE_SYSTEM_PROMPT = (
     '  "verdict_reasoning": "<1 sentence explaining the overall verdict>"\n'
     "}"
 )
-
-
-# ─── Citation injection helper ──────────────────────────────────────────────
-
-def _inject_citations_at_positions(text: str, insertions: dict) -> str:
-    """Insert [N] citation markers into text at the given char end-positions.
-
-    insertions: dict mapping 1-based char index → list of citation numbers to insert.
-    """
-    if not insertions:
-        return text
-    result_chars = []
-    for i, ch in enumerate(text):
-        result_chars.append(ch)
-        if i + 1 in insertions:
-            nums = sorted(insertions[i + 1])
-            result_chars.append("".join(f"[{n}]" for n in nums))
-    return "".join(result_chars)
-
-
-def _inject_citations(text: str, sources: list) -> str:
-    """Replace [N] citation markers with markdown links to source URLs."""
-    for i, url in enumerate(sources, 1):
-        text = re.sub(rf'\[{i}\]', f'[[{i}]]({url})', text)
-    return text
 
 
 # ─── Token tracking helpers ─────────────────────────────────────────────────
@@ -327,20 +320,30 @@ def run_youdotcom(
     stats["api_calls"] = agent_stats["api_calls"]
     stats["search_calls"] = agent_stats["search_calls"]
     stats["latency_ms"] = agent_stats["latency_ms"]
+    stats["tool_calls"] = agent_stats.get("tool_calls", [])
     return stats
 
 
 # ─── Path B: LLM + Native Web Search ───────────────────────────────────────
 
-def run_native(question: str, client, model_config: dict, on_progress=None, system_prompt: str = None) -> dict:
+def run_native(
+    question: str,
+    client,  # retained for API compatibility — agent classes create their own clients
+    model_config: dict,
+    on_progress=None,
+    system_prompt: str = None,
+    native_path: str = "responses",  # "responses" or "chat" (OpenAI only)
+) -> dict:
     """Run a query through LLM + provider's native web search.
 
-    Dispatches to Anthropic or OpenAI based on model_config["provider"].
-    - Anthropic: uses the messages API with web_search_20260209 tool (code execution disabled via allowed_callers)
-    - OpenAI:    uses the Responses API with web_search tool
+    Delegates to the provider's agent class (ClaudeAgent, OpenAIAgent, etc.)
+    which owns all provider-specific native search logic. Translates the
+    returned base_agent stats shape into compare.py's flat stats shape for
+    downstream display and cost calculation.
 
-    on_progress(msg: str) — optional callback fired on each search/round event.
-    system_prompt — override the default SYSTEM_PROMPT (for A/B testing).
+    Args:
+        native_path: OpenAI only — "responses" (Responses API, default) or
+                     "chat" (chat.completions with web_search_preview tool).
     """
     if not model_config.get("native_search_tool"):
         stats = _empty_stats()
@@ -349,436 +352,70 @@ def run_native(question: str, client, model_config: dict, on_progress=None, syst
         return stats
 
     provider = model_config["provider"]
+    model_id = model_config["model"]
+
+    # Instantiate the provider's agent class and call run_native_search().
+    # Each agent class resolves its own API key from the environment.
     if provider == "anthropic":
-        return _run_native_anthropic(question, client, model_config, on_progress, system_prompt)
+        agent = ClaudeAgent(model=model_id)
+        base_stats = agent.run_native_search(
+            question,
+            system_prompt=system_prompt,
+            on_progress=on_progress,
+            native_search_tool=model_config.get("native_search_tool"),
+        )
+
     elif provider == "openai":
-        return _run_native_openai(question, client, model_config, on_progress, system_prompt)
+        agent = OpenAIAgent(model=model_id)
+        base_stats = agent.run_native_search(
+            question,
+            system_prompt=system_prompt,
+            on_progress=on_progress,
+            native_search_tool=model_config.get("native_search_tool"),
+            chat_native_search_tool=model_config.get("chat_native_search_tool"),
+            path=native_path,
+        )
+
     elif provider == "kimi":
-        return _run_native_kimi(question, client, model_config, on_progress, system_prompt)
+        agent = KimiAgent(model=model_id)
+        base_stats = agent.run_native_search(
+            question,
+            system_prompt=system_prompt,
+            on_progress=on_progress,
+        )
+
     elif provider == "qwen":
-        return _run_native_qwen(question, client, model_config, on_progress, system_prompt)
+        agent = QwenAgent(model=model_id)
+        base_stats = agent.run_native_search(
+            question,
+            system_prompt=system_prompt,
+            on_progress=on_progress,
+        )
+
     else:
         raise ValueError(f"Unknown provider: {provider}")
 
+    # Translate base_agent shape → compare.py flat shape
+    path_label = f"{model_id} + Native Web Search"
+    if native_path == "chat":
+        path_label = f"{model_id} + Native Web Search (chat.completions)"
 
-def _run_native_anthropic(question: str, client: Anthropic, model_config: dict, on_progress=None, system_prompt: str = None) -> dict:
-    """Native search path for Anthropic — uses Claude's built-in web_search tool.
-
-    Uses streaming so the HTTP connection stays alive during long-running
-    built-in searches.  Without streaming, complex multi-hop queries can
-    cause a read-timeout because the server goes silent between internal
-    search rounds while the single API call is still in-flight.
-
-    We iterate over raw SSE events and fire on_progress() in real time so
-    the frontend can show live search activity.
-    """
-    prompt = get_system_prompt() if system_prompt is None else system_prompt
-    model_id = model_config["model"]
     stats = _empty_stats()
-    stats["path"] = f"{model_id} + Native Web Search"
+    stats["path"] = path_label
     stats["model"] = model_id
-    verbose = is_verbose()
-
-    def _notify(msg):
-        if verbose:
-            print(f"  [Native] {msg}")
-        if on_progress:
-            on_progress(msg)
-
-    messages = [{"role": "user", "content": question}]
-    t0 = time.perf_counter()
-
-    def _elapsed():
-        return f"{(time.perf_counter() - t0):.1f}s"
-
-    _notify(f"Starting stream... ({_elapsed()})")
-
-    # Stream the response — iterate over raw events to log progress,
-    # then get_final_message() to collect the fully assembled result.
-    with client.messages.stream(
-        model=model_id,
-        system=prompt,
-        max_tokens=MAX_TOKENS,
-        tools=[model_config["native_search_tool"]],
-        messages=messages,
-    ) as stream:
-        for event in stream:
-            etype = getattr(event, "type", "")
-            if etype == "content_block_start":
-                block = getattr(event, "content_block", None)
-                if block:
-                    btype = getattr(block, "type", "")
-                    if btype == "web_search_tool_use":
-                        query = getattr(block, "query", "") or ""
-                        _notify(f"Searching: \"{query}\" ({_elapsed()})")
-                    elif btype == "web_search_tool_result":
-                        _notify(f"Search results received ({_elapsed()})")
-                    elif btype == "text":
-                        _notify(f"Generating answer... ({_elapsed()})")
-                    elif btype == "server_tool_use":
-                        tool_name = getattr(block, "name", "")
-                        _notify(f"Tool call: {tool_name} ({_elapsed()})")
-
-        _notify(f"Stream consumed, assembling response... ({_elapsed()})")
-        response = stream.get_final_message()
-
-    stats["model_confirmed"] = getattr(response, "model", None)
-    stats["input_tokens"] = response.usage.input_tokens
-    stats["output_tokens"] = response.usage.output_tokens
-    stats["total_tokens"] = stats["input_tokens"] + stats["output_tokens"]
-    stats["api_calls"] = 1
-    stats["latency_ms"] = (time.perf_counter() - t0) * 1000
-
-    _notify(f"Complete — {stats['latency_ms']:.0f}ms total ({_elapsed()})")
-
-    # source_index_map: url → 1-based citation number (across all search rounds)
-    source_index_map: dict[str, int] = {}
-
-    for block in response.content:
-        if block.type == "web_search_tool_result":
-            stats["search_calls"] += 1
-            if hasattr(block, "content") and isinstance(block.content, list):
-                for result in block.content:
-                    url = getattr(result, "url", None)
-                    if url and url not in source_index_map:
-                        source_index_map[url] = len(source_index_map) + 1
-                        stats["sources"].append(url)
-                    if hasattr(result, "page_content") and result.page_content:
-                        stats["search_context_tokens"] += len(result.page_content) // 4
-                    elif hasattr(result, "text") and result.text:
-                        stats["search_context_tokens"] += len(result.text) // 4
-
-        elif block.type == "text" and getattr(block, "text", None):
-            text = block.text
-            # Anthropic web_search_20260209 returns citations as structured
-            # annotation objects (start_char_index / end_char_index / url) rather
-            # than embedding [N] markers in the text itself.  We inject them here
-            # so the frontend can render clickable inline citations.
-            citations = getattr(block, "citations", None) or []
-            if citations:
-                # Build insertion map: char_index → set of citation numbers
-                insertions: dict[int, list[int]] = {}
-                for cit in citations:
-                    url = getattr(cit, "url", None) or getattr(cit, "document_url", None)
-                    if not url:
-                        continue
-                    if url not in source_index_map:
-                        source_index_map[url] = len(source_index_map) + 1
-                        stats["sources"].append(url)
-                    n = source_index_map[url]
-                    end = getattr(cit, "end_char_index", None)
-                    if end is not None:
-                        insertions.setdefault(end, [])
-                        if n not in insertions[end]:
-                            insertions[end].append(n)
-                # Rebuild text with [N] markers inserted at citation end positions
-                text = _inject_citations_at_positions(text, insertions)
-            stats["answer"] += text
-
-    if stats["search_context_tokens"] == 0 and stats["input_tokens"] > 500:
-        stats["search_context_tokens"] = stats["input_tokens"] - 400
-
-    if verbose:
-        print(f"  [Native] {stats['search_calls']} search(es), {stats['input_tokens']} input tokens, {stats['latency_ms']:.0f}ms total")
-
+    stats["model_confirmed"] = base_stats.get("model_confirmed")
+    stats["answer"] = base_stats.get("answer", "")
+    stats["sources"] = base_stats.get("sources", [])
+    stats["total_tokens"] = base_stats.get("tokens_used", 0)
+    stats["input_tokens"] = base_stats.get("token_breakdown", {}).get("input", 0)
+    stats["output_tokens"] = base_stats.get("token_breakdown", {}).get("output", 0)
+    stats["search_context_tokens"] = base_stats.get("token_breakdown", {}).get("search_context", 0)
+    stats["api_calls"] = base_stats.get("api_calls", 0)
+    stats["search_calls"] = base_stats.get("search_calls", 0)
+    stats["latency_ms"] = base_stats.get("latency_ms", 0.0)
     return stats
 
 
-def _run_native_openai(question: str, client: OpenAI, model_config: dict, on_progress=None, system_prompt: str = None) -> dict:
-    """Native search path for OpenAI — uses Responses API with web_search tool.
-
-    OpenAI's native web search for gpt-5+ models:
-    - Uses client.responses.create() (NOT chat.completions)
-    - Tool: {"type": "web_search"}
-    - $10/1k searches + search content tokens billed at model input rates
-    - Returns web_search_call items + message with url_citation annotations
-    """
-    prompt = get_system_prompt() if system_prompt is None else system_prompt
-    model_id = model_config["model"]
-    stats = _empty_stats()
-    stats["path"] = f"{model_id} + Native Web Search"
-    stats["model"] = model_id
-    verbose = is_verbose()
-
-    def _notify(msg):
-        if verbose:
-            print(f"  [Native] {msg}")
-        if on_progress:
-            on_progress(msg)
-
-    t0 = time.perf_counter()
-
-    def _elapsed():
-        return f"{(time.perf_counter() - t0):.1f}s"
-
-    _notify(f"Starting request... ({_elapsed()})")
-
-    response = client.responses.create(
-        model=model_id,
-        instructions=prompt,
-        tools=[model_config["native_search_tool"]],
-        input=question,
-    )
-
-    stats["model_confirmed"] = getattr(response, "model", None)
-    stats["latency_ms"] = (time.perf_counter() - t0) * 1000
-    stats["api_calls"] = 1
-
-    # Extract usage from the response
-    if hasattr(response, "usage") and response.usage:
-        stats["input_tokens"] = getattr(response.usage, "input_tokens", 0)
-        stats["output_tokens"] = getattr(response.usage, "output_tokens", 0)
-    stats["total_tokens"] = stats["input_tokens"] + stats["output_tokens"]
-
-    # Parse output items: web_search_call items and message items
-    for item in response.output:
-        item_type = getattr(item, "type", "")
-
-        if item_type == "web_search_call":
-            stats["search_calls"] += 1
-            search_query = getattr(item, "query", "") or getattr(item, "input", "") or ""
-            _notify(f"Search {stats['search_calls']}: \"{search_query}\" ({_elapsed()})")
-
-        elif item_type == "message":
-            _notify(f"Generating answer... ({_elapsed()})")
-            for content_part in getattr(item, "content", []):
-                part_type = getattr(content_part, "type", "")
-                if part_type == "output_text":
-                    text = getattr(content_part, "text", "")
-                    annotations = getattr(content_part, "annotations", []) or []
-                    # url_citation annotations carry start_index/end_index into the
-                    # text plus the source URL.  Build a source_index_map and inject
-                    # [N] markers at end_index positions so citations are visible.
-                    source_index_map: dict[str, int] = {
-                        u: i + 1 for i, u in enumerate(stats["sources"])
-                    }
-                    insertions: dict[int, list[int]] = {}
-                    for ann in annotations:
-                        if getattr(ann, "type", "") != "url_citation":
-                            continue
-                        url = getattr(ann, "url", "")
-                        if not url:
-                            continue
-                        if url not in source_index_map:
-                            source_index_map[url] = len(source_index_map) + 1
-                            stats["sources"].append(url)
-                        n = source_index_map[url]
-                        end = getattr(ann, "end_index", None)
-                        if end is not None:
-                            insertions.setdefault(end, [])
-                            if n not in insertions[end]:
-                                insertions[end].append(n)
-                    text = _inject_citations_at_positions(text, insertions)
-                    stats["answer"] += text
-
-    # OpenAI web_search tool: search content tokens are billed at model input rates
-    # and included in input_tokens. Estimate search_context_tokens for display.
-    if stats["search_calls"] > 0 and stats["input_tokens"] > 200:
-        stats["search_context_tokens"] = stats["input_tokens"] - 200
-
-    _notify(f"Complete — {stats['latency_ms']:.0f}ms total ({_elapsed()})")
-
-    return stats
-
-
-def _run_native_kimi(question: str, client: OpenAI, model_config: dict, on_progress=None, system_prompt: str = None) -> dict:
-    """Native search path for Kimi — uses Moonshot's $web_search builtin_function.
-
-    Kimi's built-in search works differently from regular tool use:
-    - Tool declared as {"type": "builtin_function", "function": {"name": "$web_search"}}
-    - When model returns finish_reason="tool_calls" with $web_search, the API has
-      already executed the search internally — client returns the arguments unchanged
-      as the tool result to complete the agentic loop.
-    - Thinking must be disabled via extra_body={"thinking": {"type": "disabled"}}.
-    """
-    prompt = get_system_prompt() if system_prompt is None else system_prompt
-    model_id = model_config["model"]
-    stats = _empty_stats()
-    stats["path"] = f"{model_id} + Native Web Search"
-    stats["model"] = model_id
-    verbose = is_verbose()
-
-    def _notify(msg):
-        if verbose:
-            print(f"  [Native] {msg}")
-        if on_progress:
-            on_progress(msg)
-
-    kimi_tool = [{"type": "builtin_function", "function": {"name": "$web_search"}}]
-
-    messages = [
-        {"role": "system", "content": prompt},
-        {"role": "user", "content": question},
-    ]
-    t0 = time.perf_counter()
-    baseline_input = 0
-    choice = None
-
-    def _elapsed():
-        return f"{(time.perf_counter() - t0):.1f}s"
-
-    _notify(f"Starting request... ({_elapsed()})")
-
-    for round_num in range(MAX_TOOL_ROUNDS):
-        _notify(f"LLM round {round_num + 1}... ({_elapsed()})")
-
-        response = client.chat.completions.create(
-            model=model_id,
-            messages=messages,
-            tools=kimi_tool,
-            max_completion_tokens=MAX_TOKENS,
-            extra_body={"thinking": {"type": "disabled"}},
-        )
-
-        if response.usage:
-            call_input = getattr(response.usage, "prompt_tokens", 0)
-            call_output = getattr(response.usage, "completion_tokens", 0)
-        else:
-            call_input = call_output = 0
-
-        stats["input_tokens"] += call_input
-        stats["output_tokens"] += call_output
-        stats["api_calls"] += 1
-
-        if round_num == 0:
-            baseline_input = call_input
-            stats["model_confirmed"] = getattr(response, "model", None)
-
-        choice = response.choices[0] if response.choices else None
-
-        if not choice or choice.finish_reason != "tool_calls" or not (choice.message and choice.message.tool_calls):
-            break
-
-        messages.append(choice.message)
-
-        for tool_call in choice.message.tool_calls:
-            if tool_call.function.name != "$web_search":
-                continue
-
-            stats["search_calls"] += 1
-            # Return arguments unchanged — Kimi executed the search internally.
-            # args only contain {"search_result":{"search_id":"..."}} — no URLs here.
-            raw_args = tool_call.function.arguments
-            _notify(f"Search {stats['search_calls']}: round {round_num + 1} ({_elapsed()})")
-
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": raw_args,
-            })
-    else:
-        stats["hit_round_limit"] = True
-
-    _notify(f"Generating answer... ({_elapsed()})")
-
-    stats["latency_ms"] = (time.perf_counter() - t0) * 1000
-    stats["total_tokens"] = stats["input_tokens"] + stats["output_tokens"]
-
-    if stats["api_calls"] > 1:
-        stats["search_context_tokens"] = max(0, stats["input_tokens"] - baseline_input * stats["api_calls"])
-
-    stats["answer"] = choice.message.content if choice and choice.message else ""
-
-    # Kimi does not expose source URLs via the API — extract them from the answer text.
-    # The model includes markdown links ([title](url)) and bare URLs when asked to cite.
-    seen = set()
-    for url in re.findall(r'https?://[^\s\)\]"\'<>]+', stats["answer"]):
-        url = url.rstrip('.,;:')
-        if url not in seen:
-            seen.add(url)
-            stats["sources"].append(url)
-
-    _notify(f"Complete — {stats['latency_ms']:.0f}ms total ({_elapsed()})")
-
-    return stats
-
-
-def _run_native_qwen(question: str, client: OpenAI, model_config: dict, on_progress=None, system_prompt: str = None) -> dict:
-    """Native search path for Qwen — uses DashScope Responses API with web_search tool.
-
-    Uses client.responses.create() with tools=[{"type": "web_search"}], mirroring
-    how GPT native search works. DashScope's Responses API handles the search loop
-    internally and returns web_search_call output items + url_citation annotations.
-
-    Note: enable_search via extra_body (Chat Completions) does NOT reliably trigger
-    live search for qwen3.7-max — the model may respond from training data instead.
-    The Responses API with an explicit web_search tool declaration is the correct path.
-
-    ENDPOINT REQUIREMENT:
-      Standard DashScope international endpoint (hardcoded in _create_client("qwen")).
-      The MaaS workspace endpoint (DASHSCOPE_BASE_URL) does not support the Responses API.
-    """
-    prompt = get_system_prompt() if system_prompt is None else system_prompt
-    model_id = model_config["model"]
-    stats = _empty_stats()
-    stats["path"] = f"{model_id} + Native Web Search"
-    stats["model"] = model_id
-    verbose = is_verbose()
-
-    def _notify(msg):
-        if verbose:
-            print(f"  [Native] {msg}")
-        if on_progress:
-            on_progress(msg)
-
-    t0 = time.perf_counter()
-
-    def _elapsed():
-        return f"{(time.perf_counter() - t0):.1f}s"
-
-    _notify(f"POST dashscope-intl.aliyuncs.com/compatible-mode/v1/responses · model={model_id} · tools=[web_search] · enable_thinking=False ({_elapsed()})")
-
-    response = client.responses.create(
-        model=model_id,
-        instructions=prompt,
-        input=question,
-        tools=[{"type": "web_search"}],
-        extra_body={"enable_thinking": False},
-    )
-
-    stats["model_confirmed"] = getattr(response, "model", None)
-    stats["latency_ms"] = (time.perf_counter() - t0) * 1000
-    stats["api_calls"] = 1
-
-    if hasattr(response, "usage") and response.usage:
-        stats["input_tokens"] = getattr(response.usage, "input_tokens", 0)
-        stats["output_tokens"] = getattr(response.usage, "output_tokens", 0)
-    stats["total_tokens"] = stats["input_tokens"] + stats["output_tokens"]
-
-    # Parse output items.
-    # DashScope differs from OpenAI: source URLs live in item.action.sources on the
-    # web_search_call item (not as url_citation annotations on the message).
-    for item in response.output:
-        item_type = getattr(item, "type", "")
-
-        if item_type == "web_search_call":
-            stats["search_calls"] += 1
-            action = getattr(item, "action", None)
-            display_query = "(internal)"
-            if action:
-                # DashScope does not expose the actual query string used internally;
-                # action.query is a generic "Web search" label, action.queries is None.
-                raw_query = getattr(action, "query", "") or ""
-                display_query = raw_query if raw_query and raw_query.lower() != "web search" else "(internal)"
-                # Extract source URLs from action.sources
-                for src in getattr(action, "sources", []):
-                    url = getattr(src, "url", "")
-                    if url and url not in stats["sources"]:
-                        stats["sources"].append(url)
-            _notify(f"Search {stats['search_calls']}: query={display_query} · {len(stats['sources'])} sources returned ({_elapsed()})")
-
-        elif item_type == "message":
-            _notify(f"Generating answer... ({_elapsed()})")
-            for part in getattr(item, "content", []):
-                if getattr(part, "type", "") == "output_text":
-                    stats["answer"] += getattr(part, "text", "")
-
-    if stats["search_calls"] > 0 and stats["input_tokens"] > 200:
-        stats["search_context_tokens"] = stats["input_tokens"] - 200
-
-    _notify(f"Complete — {stats['latency_ms']:.0f}ms total ({_elapsed()})")
-
-    return stats
 
 
 # ─── Judge evaluation ───────────────────────────────────────────────────────

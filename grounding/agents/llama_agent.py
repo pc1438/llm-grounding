@@ -27,7 +27,7 @@ import sys
 
 from openai import OpenAI
 
-from base_agent import OpenAICompatibleAgent
+from base_agent import OpenAICompatibleAgent, _empty_stats
 
 BACKENDS = {
     "together": {
@@ -81,6 +81,20 @@ class LlamaAgent(OpenAICompatibleAgent):
         client = OpenAI(api_key=resolved_key, base_url=cfg["base_url"])
         model = model or cfg["default_model"]
         super().__init__(client=client, model=model)
+
+
+    def run_native_search(
+        self,
+        question: str,
+        system_prompt: str = None,
+        on_progress=None,
+        **kwargs,
+    ) -> dict:
+        """Native search is not supported for Llama (Together AI / Ollama have no built-in search)."""
+        stats = _empty_stats(self.model)
+        stats["interface"] = "not_supported"
+        stats["answer"] = "Native web search is not available for Llama via Together AI or Ollama."
+        return stats
 
 
 if __name__ == "__main__":
