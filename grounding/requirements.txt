@@ -1,0 +1,22 @@
+# Core (required for all integration paths)
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# ─── Direct API path: demo.py + agents/*.py ─────────────────────────────────
+# Install the providers you need. You only need YDC_API_KEY + one LLM key.
+anthropic>=0.40.0        # Claude (tool_use API)
+openai>=1.50.0           # GPT-4.1, Qwen, Kimi, Llama (function calling)
+
+# ─── LangChain path: langchain_agent.py (optional) ──────────────────────────
+# pip install langchain-youdotcom langchain-openai langgraph
+langchain-youdotcom>=0.2.0
+langchain-openai>=0.2.0
+langgraph>=0.2.0
+
+# ─── MCP path: mcp_demo.py (optional) ───────────────────────────────────────
+# pip install mcp httpx
+mcp>=1.0.0
+httpx>=0.27.0
+
+# ─── You.com Python SDK (optional alternative to raw requests) ──────────────
+youdotcom>=0.3.0

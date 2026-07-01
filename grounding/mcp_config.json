@@ -1,0 +1,22 @@
+{
+  "_comment": "You.com MCP server configuration for Claude Code / Claude Desktop / Cursor / VS Code",
+  "_docs": "https://docs.you.com/developer-resources/mcp-server",
+
+  "mcpServers": {
+    "youdotcom": {
+      "_comment_remote": "Option 1: Remote server (recommended — always up to date)",
+      "url": "https://api.you.com/mcp",
+      "headers": {
+        "X-API-Key": "${YDC_API_KEY}"
+      }
+    },
+    "youdotcom-local": {
+      "_comment_local": "Option 2: Local server via npx (STDIO transport)",
+      "command": "npx",
+      "args": ["-y", "@youdotcom-oss/mcp"],
+      "env": {
+        "YDC_API_KEY": "${YDC_API_KEY}"
+      }
+    }
+  }
+}

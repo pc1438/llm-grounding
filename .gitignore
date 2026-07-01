@@ -1,0 +1,50 @@
+# Environment and secrets — NEVER share these
+.env
+env.txt
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Archives (may contain keys)
+*.zip
+
+# Benchmark and A/B test output — generated data, not source
+comparison/benchmark_results_*.json
+comparison/ab_*_results*.json
+comparison/ab_claude_prompt_results.json
+GPT\ comparison/results_*.json
+
+# Article / documentation directory — drafts, PDFs, docx, diagrams
+# These are not part of the runnable codebase
+article/
+
+# Competitive research spreadsheet — internal, not for public repo
+Search_API_Use_Case_Competitive_Audit.xlsx
+
+# Claude Code project config — local dev tooling, not project config
+.claude/

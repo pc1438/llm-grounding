@@ -1,0 +1,260 @@
+{
+  "_note": "Single source of truth for all model pricing. Edit this file to update rates \u2014 compare.py and the frontend both read from here via /api/pricing.",
+  "_last_verified": "2026-06-30",
+  "models": {
+    "claude": {
+      "model": "claude-sonnet-4-6",
+      "display_name": "Claude Sonnet 4.6",
+      "vendor": "Anthropic",
+      "provider": "anthropic",
+      "in_comparison": true,
+      "in_playground": true,
+      "native_search_tool": {
+        "type": "web_search_20260209",
+        "name": "web_search"
+      },
+      "input_cost_per_m": 3.0,
+      "output_cost_per_m": 15.0,
+      "pricing_source_url": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "model_url": "https://www.anthropic.com/claude/sonnet",
+      "release_url": "https://www.anthropic.com/news/claude-sonnet-4",
+      "ydc_search_cost_per_call": 0.005,
+      "native_search_cost_per_call": 0.01,
+      "native_search_note": " + search results billed as input tokens",
+      "native_search_source_url": "https://docs.anthropic.com/en/docs/build-with-claude/tool-use/web-search-tool",
+      "judge": "openai",
+      "cost_notes": "Input / Output",
+      "added": "2026-06-01",
+      "api_shape": "anthropic"
+    },
+    "claude-opus": {
+      "model": "claude-opus-4-8",
+      "display_name": "Claude Opus 4.8",
+      "vendor": "Anthropic",
+      "provider": "anthropic",
+      "in_comparison": true,
+      "in_playground": true,
+      "native_search_tool": {
+        "type": "web_search_20260209",
+        "name": "web_search"
+      },
+      "input_cost_per_m": 5.0,
+      "output_cost_per_m": 25.0,
+      "pricing_source_url": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "model_url": "https://www.anthropic.com/claude/opus",
+      "release_url": "https://www.anthropic.com/news/claude-opus-4",
+      "ydc_search_cost_per_call": 0.005,
+      "native_search_cost_per_call": 0.01,
+      "native_search_note": " + search results billed as input tokens",
+      "native_search_source_url": "https://docs.anthropic.com/en/docs/build-with-claude/tool-use/web-search-tool",
+      "judge": "openai",
+      "cost_notes": "Newer tokenizer (~30% more tokens vs Sonnet 4.6 for same text). Extended thinking available.",
+      "added": "2026-06-30",
+      "api_shape": "anthropic"
+    },
+    "gpt5.4": {
+      "model": "gpt-5.4",
+      "display_name": "GPT-5.4",
+      "vendor": "OpenAI",
+      "provider": "openai",
+      "in_comparison": true,
+      "in_playground": true,
+      "native_search_tool": {
+        "type": "web_search",
+        "search_context_size": "medium"
+      },
+      "input_cost_per_m": 2.5,
+      "output_cost_per_m": 15.0,
+      "pricing_source_url": "https://developers.openai.com/api/docs/pricing",
+      "model_url": "https://developers.openai.com/api/docs/models/gpt-5.4",
+      "release_url": "https://openai.com/index/gpt-5/",
+      "ydc_search_cost_per_call": 0.005,
+      "native_search_cost_per_call": 0.01,
+      "native_search_note": " + search content tokens billed at model rates",
+      "native_search_source_url": "https://platform.openai.com/docs/guides/tools-web-search",
+      "judge": "claude",
+      "cost_notes": "Short context rate",
+      "added": "2026-06-01",
+      "api_shape": "responses",
+      "max_tokens_param": "max_completion_tokens"
+    },
+    "gpt5.5": {
+      "model": "gpt-5.5",
+      "display_name": "GPT-5.5",
+      "vendor": "OpenAI",
+      "provider": "openai",
+      "in_comparison": true,
+      "in_playground": true,
+      "native_search_tool": {
+        "type": "web_search",
+        "search_context_size": "medium"
+      },
+      "input_cost_per_m": 5.0,
+      "output_cost_per_m": 30.0,
+      "pricing_source_url": "https://developers.openai.com/api/docs/pricing",
+      "model_url": "https://developers.openai.com/api/docs/models/gpt-5.5",
+      "release_url": "https://openai.com/index/gpt-5/",
+      "ydc_search_cost_per_call": 0.005,
+      "native_search_cost_per_call": 0.01,
+      "native_search_note": " + search content tokens billed at model rates",
+      "native_search_source_url": "https://platform.openai.com/docs/guides/tools-web-search",
+      "judge": "claude",
+      "cost_notes": "Available in Responses and Chat Completions APIs",
+      "added": "2026-06-30",
+      "api_shape": "responses",
+      "max_tokens_param": "max_completion_tokens"
+    },
+    "kimi": {
+      "model": "kimi-k2.6",
+      "display_name": "Kimi K2.6",
+      "vendor": "Moonshot AI",
+      "provider": "kimi",
+      "in_comparison": true,
+      "in_playground": true,
+      "native_search_tool": {
+        "type": "builtin_function",
+        "name": "$web_search"
+      },
+      "input_cost_per_m": 0.95,
+      "output_cost_per_m": 4.0,
+      "pricing_source_url": "https://platform.kimi.ai/docs/pricing/chat-k26",
+      "model_url": "https://platform.kimi.ai/docs/models/kimi-k2",
+      "release_url": "https://moonshotai.github.io/Kimi-K2/",
+      "ydc_search_cost_per_call": 0.005,
+      "native_search_cost_per_call": 0.005,
+      "native_search_note": " + search result tokens billed at model rates",
+      "native_search_source_url": "https://platform.kimi.ai/docs/pricing/tools",
+      "judge": "claude",
+      "cost_notes": "Verified 2026-06-30",
+      "added": "2026-06-29",
+      "api_shape": "chat_completions",
+      "base_url": "https://api.moonshot.ai/v1"
+    },
+    "qwen": {
+      "model": "qwen3.7-max",
+      "display_name": "Qwen3.7 Max",
+      "vendor": "Alibaba Cloud",
+      "provider": "qwen",
+      "in_comparison": true,
+      "in_playground": true,
+      "native_search_tool": {
+        "type": "web_search"
+      },
+      "input_cost_per_m": 1.25,
+      "output_cost_per_m": 3.75,
+      "pricing_source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+      "model_url": "https://www.alibabacloud.com/help/en/model-studio/qwen3-7-max",
+      "release_url": "https://qwenlm.github.io/blog/qwen3/",
+      "ydc_search_cost_per_call": 0.005,
+      "native_search_cost_per_call": 0.0,
+      "native_search_note": " (search bundled \u2014 no separate per-search fee)",
+      "native_search_source_url": "https://www.alibabacloud.com/help/en/model-studio/use-qwen-by-calling-api",
+      "judge": "claude",
+      "cost_notes": "50% promo rate; list price $2.50/$7.50. Verified 2026-06-30.",
+      "added": "2026-06-30",
+      "api_shape": "responses"
+    },
+    "llama": {
+      "model": "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
+      "display_name": "Llama 4 Maverick",
+      "vendor": "Meta (via Together AI)",
+      "provider": "openai",
+      "api_key_env": "TOGETHER_API_KEY",
+      "base_url": "https://api.together.xyz/v1",
+      "in_comparison": true,
+      "in_playground": true,
+      "native_search_tool": null,
+      "input_cost_per_m": 0.27,
+      "output_cost_per_m": 0.85,
+      "pricing_source_url": "https://www.together.ai/pricing",
+      "model_url": "https://www.together.ai/models/llama-4-maverick",
+      "release_url": "https://ai.meta.com/blog/llama-4-multimodal-intelligence/",
+      "ydc_search_cost_per_call": 0.005,
+      "native_search_cost_per_call": null,
+      "native_search_note": "",
+      "native_search_source_url": "",
+      "judge": null,
+      "cost_notes": "Serverless rate via Together AI. No native web search.",
+      "added": "2026-06-01",
+      "api_shape": "chat_completions"
+    }
+  },
+  "search_services": [
+    {
+      "name": "You.com Search API",
+      "price": "$5 / 1,000 queries",
+      "notes": "Search results returned as tool output; tokens billed separately by LLM provider",
+      "source_url": "https://you.com/platform/pricing"
+    },
+    {
+      "name": "Anthropic Native Search (web_search_20260209)",
+      "price": "$10 / 1,000 searches",
+      "notes": "+ search results billed as input tokens (dual charge)",
+      "source_url": "https://docs.anthropic.com/en/docs/build-with-claude/tool-use/web-search-tool"
+    },
+    {
+      "name": "OpenAI Native Search (gpt-5+, Responses API)",
+      "price": "$10 / 1,000 searches",
+      "notes": "+ search content tokens billed at model rates",
+      "source_url": "https://platform.openai.com/docs/guides/tools-web-search"
+    },
+    {
+      "name": "Kimi $web_search (builtin_function)",
+      "price": "$5 / 1,000 searches",
+      "notes": "+ search result tokens billed at model rates",
+      "source_url": "https://platform.kimi.ai/docs/pricing/tools"
+    },
+    {
+      "name": "Qwen DashScope web_search (Responses API)",
+      "price": "Bundled",
+      "notes": "No separate per-search fee; search cost included in token pricing",
+      "source_url": "https://www.alibabacloud.com/help/en/model-studio/use-qwen-by-calling-api"
+    }
+  ],
+  "history": [
+    {
+      "date": "2026-06-30",
+      "event": "initial_pricing_audit",
+      "note": "First formal documentation of rates in effect at project start. Applies to all comparison runs prior to this date.",
+      "entries": [
+        {
+          "key": "claude",
+          "model": "claude-sonnet-4-6",
+          "input_cost_per_m": 3.0,
+          "output_cost_per_m": 15.0,
+          "ydc_search_cost_per_call": 0.005,
+          "native_search_cost_per_call": 0.01,
+          "source": "platform.claude.com/docs/pricing"
+        },
+        {
+          "key": "gpt5.4",
+          "model": "gpt-5.4",
+          "input_cost_per_m": 2.5,
+          "output_cost_per_m": 15.0,
+          "ydc_search_cost_per_call": 0.005,
+          "native_search_cost_per_call": 0.01,
+          "source": "developers.openai.com/api/docs/pricing"
+        },
+        {
+          "key": "kimi",
+          "model": "kimi-k2.6",
+          "input_cost_per_m": 0.95,
+          "output_cost_per_m": 4.0,
+          "ydc_search_cost_per_call": 0.005,
+          "native_search_cost_per_call": 0.005,
+          "source": "platform.kimi.ai/docs/pricing"
+        },
+        {
+          "key": "qwen",
+          "model": "qwen3.7-max",
+          "input_cost_per_m": 1.25,
+          "output_cost_per_m": 3.75,
+          "ydc_search_cost_per_call": 0.005,
+          "native_search_cost_per_call": 0.0,
+          "cost_notes": "50% promo rate active. List price $2.50/$7.50.",
+          "source": "alibabacloud.com/help/en/model-studio/model-pricing"
+        }
+      ]
+    }
+  ]
+}

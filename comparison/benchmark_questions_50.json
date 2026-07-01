@@ -1,0 +1,90 @@
+{
+  "description": "50 benchmark questions for You.com vs Native Search comparison",
+  "distribution": "12 simple lookups, 18 moderate synthesis, 12 complex multi-source, 8 deep research",
+  "domains": "Finance (8), Tech (7), Healthcare (3), Economics (3), Sports (3), Regulation (2), Automotive (2), Entertainment (2), Environment (2), Earnings (2), + 16 others",
+  "note": "Questions 13-19 and 31-32 are carried forward from the original 10. All others are new.",
+  "tiers": [
+    {
+      "tier": 1,
+      "name": "Simple",
+      "count": 12,
+      "description": "Current facts, prices, scores. LLM barely reasons — just needs to fetch.",
+      "questions": [
+        {"id": 1, "query": "What is the current price of NVIDIA stock?", "domain": "Finance"},
+        {"id": 2, "query": "What were the final scores in yesterday's NBA games?", "domain": "Sports"},
+        {"id": 3, "query": "What is the current 30-year fixed mortgage rate in the US?", "domain": "Finance"},
+        {"id": 4, "query": "Who won the most recent Formula 1 Grand Prix and what was the margin?", "domain": "Sports"},
+        {"id": 5, "query": "What is the current USD to Japanese yen exchange rate?", "domain": "Finance"},
+        {"id": 6, "query": "What was the closing price of the S&P 500 index today?", "domain": "Finance"},
+        {"id": 7, "query": "What is the latest unemployment rate reported by the Bureau of Labor Statistics?", "domain": "Economics"},
+        {"id": 8, "query": "What are the top 5 trending topics on GitHub this week?", "domain": "Tech"},
+        {"id": 9, "query": "What is the current Bitcoin price and 24-hour trading volume?", "domain": "Crypto"},
+        {"id": 10, "query": "What movies are currently number 1 and 2 at the US box office?", "domain": "Entertainment"},
+        {"id": 11, "query": "What is the current air quality index in Los Angeles?", "domain": "Environment"},
+        {"id": 12, "query": "What were the Powerball winning numbers in the most recent drawing?", "domain": "General"}
+      ]
+    },
+    {
+      "tier": 2,
+      "name": "Moderate synthesis",
+      "count": 18,
+      "description": "Combine 2-3 sources. Summarize, compare, or explain recent events.",
+      "questions": [
+        {"id": 13, "query": "What happened in tech news today?", "domain": "Tech"},
+        {"id": 14, "query": "Current S&P 500 price and market summary", "domain": "Finance"},
+        {"id": 15, "query": "Latest NVIDIA earnings and stock performance", "domain": "Earnings"},
+        {"id": 16, "query": "What are the latest developments in weight loss drugs?", "domain": "Healthcare"},
+        {"id": 17, "query": "Summarize the EU AI Act enforcement updates in 2026", "domain": "Regulation"},
+        {"id": 18, "query": "Apple WWDC 2026 announcements", "domain": "Tech"},
+        {"id": 19, "query": "Latest SpaceX Starship launch results", "domain": "Science"},
+        {"id": 20, "query": "What is the current status of the Ukraine-Russia conflict and recent peace negotiations?", "domain": "Geopolitics"},
+        {"id": 21, "query": "What new FDA drug approvals have been announced this month?", "domain": "Healthcare"},
+        {"id": 22, "query": "What are the latest wildfire conditions in California and what areas are affected?", "domain": "Environment"},
+        {"id": 23, "query": "Summarize the most recent Federal Reserve meeting minutes and rate decisions", "domain": "Economics"},
+        {"id": 24, "query": "What major cybersecurity breaches have been reported in the past 30 days?", "domain": "Security"},
+        {"id": 25, "query": "What is the current state of the US housing market in major metro areas?", "domain": "Real Estate"},
+        {"id": 26, "query": "What were the key announcements from the most recent Google I/O conference?", "domain": "Tech"},
+        {"id": 27, "query": "What is the current status of bird flu outbreaks and any human transmission cases?", "domain": "Healthcare"},
+        {"id": 28, "query": "What are the latest developments in humanoid robotics from Boston Dynamics, Tesla, and Figure?", "domain": "Tech"},
+        {"id": 29, "query": "Summarize the most recent earnings calls for Microsoft, including revenue and cloud growth", "domain": "Earnings"},
+        {"id": 30, "query": "What new tariffs or trade restrictions have been announced between the US and China this quarter?", "domain": "Trade"}
+      ]
+    },
+    {
+      "tier": 3,
+      "name": "Complex multi-source",
+      "count": 12,
+      "description": "Cross-entity comparison, multi-constraint analysis. Requires finding and reconciling data from several sources.",
+      "questions": [
+        {"id": 31, "query": "Compare Tesla and BYD Q1 2026 delivery numbers and market share for the US market", "domain": "Automotive"},
+        {"id": 32, "query": "Who won the 2026 NBA draft lottery?", "domain": "Sports"},
+        {"id": 33, "query": "Compare the pricing, context windows, and benchmark scores of Claude 4.5, GPT-5.4, and Gemini 2.5", "domain": "AI"},
+        {"id": 34, "query": "What are the top 5 best-selling EVs in the US, Europe, and China this year, and how do the lists differ?", "domain": "Automotive"},
+        {"id": 35, "query": "Compare the latest inflation rates, interest rates, and GDP growth for the US, EU, and Japan", "domain": "Economics"},
+        {"id": 36, "query": "Which major tech companies have announced layoffs in 2026, how many employees were affected at each, and what reasons did they give?", "domain": "Tech"},
+        {"id": 37, "query": "Compare the current carbon intensity, actual emissions reductions, and renewable energy investments of the US, China, and India over the past year", "domain": "Climate"},
+        {"id": 38, "query": "What are the current market caps, PE ratios, and year-to-date stock returns for the Magnificent 7 tech stocks?", "domain": "Finance"},
+        {"id": 39, "query": "Compare the latest quarterly revenue, subscriber counts, and content spending of Netflix, Disney+, and Amazon Prime Video", "domain": "Entertainment/Finance"},
+        {"id": 40, "query": "What US states have passed AI regulation bills in 2025-2026, what are their rules, and how do they differ from the EU AI Act?", "domain": "Regulation"},
+        {"id": 41, "query": "Compare the safety records, launch cadence, and payload capacity of SpaceX Falcon 9, Rocket Lab Electron, and Blue Origin New Glenn in their most recent 12 months of operations", "domain": "Space"},
+        {"id": 42, "query": "What semiconductor fabs are currently under construction globally, who is building them, what is their expected capacity, and when are they scheduled to come online?", "domain": "Tech"}
+      ]
+    },
+    {
+      "tier": 4,
+      "name": "Deep research",
+      "count": 8,
+      "description": "Exhaustive enumeration, causal chains, multi-hop reasoning. Inspired by FRAMES / DeepSearchQA patterns.",
+      "questions": [
+        {"id": 43, "query": "List every country that has either banned or placed a moratorium on deepfake-generated political advertising in 2025-2026. For each, summarize the specific law or regulation and its enforcement mechanism.", "domain": "Policy"},
+        {"id": 44, "query": "Which pharmaceutical companies have active GLP-1 receptor agonist drugs in Phase 3 clinical trials as of today? For each, list the drug name, target indication, trial ID, and expected completion date.", "domain": "Pharma"},
+        {"id": 45, "query": "Trace the ownership chain of Twitter/X from its founding through today, listing each major ownership change, the transaction value, and how the company's valuation changed at each step.", "domain": "Business"},
+        {"id": 46, "query": "What sovereign wealth funds have invested in US AI companies in the past 12 months? For each investment, list the fund, the company, the amount, and the round.", "domain": "Finance"},
+        {"id": 47, "query": "List all commercial nuclear fusion companies that have raised over $100M in total funding. For each, summarize their technical approach, total funding, latest milestone, and projected timeline to net energy.", "domain": "Energy"},
+        {"id": 48, "query": "Which cities worldwide have implemented congestion pricing for vehicles as of 2026? For each city, list when it started, the charge amount, the zone boundaries, and any measured impact on traffic or emissions.", "domain": "Urban"},
+        {"id": 49, "query": "What major antitrust actions have been filed or decided against Amazon, Google, Apple, Meta, and Microsoft in the US and EU since January 2025? For each, list the agency, the allegation, the current status, and any penalties imposed.", "domain": "Legal"},
+        {"id": 50, "query": "Identify all AI foundation model governance frameworks that have been published or entered into force at a global level in 2025-2026. For each, list the issuing body, the key safety requirements, and any known adoption or enforcement actions.", "domain": "AI Safety"}
+      ]
+    }
+  ]
+}

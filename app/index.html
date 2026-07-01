@@ -1,0 +1,3250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>You.com Web Search API for LLMs — Live Demo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f5f0e8;
+    color: #2d2a24;
+    min-height: 100vh;
+  }
+
+  /* ─── Header ─────────────────────────────────────────────────────── */
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    padding: 24px 32px 0;
+    background: #faf6ef;
+    border-bottom: 1px solid #ddd5c8;
+  }
+  .header h1 { font-size: 20px; font-weight: 600; color: #1a1714; }
+  .header .subtitle { font-size: 13px; color: #8a8078; margin-top: 4px; }
+
+  /* ─── Tab bar ────────────────────────────────────────────────────── */
+  .tab-bar {
+    display: flex;
+    gap: 0;
+    margin-top: 16px;
+  }
+  .tab-btn {
+    padding: 10px 24px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #8a8078;
+    background: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .tab-btn:hover { color: #4d4a44; }
+  .tab-btn.active {
+    color: #c47a4a;
+    border-bottom-color: #c47a4a;
+  }
+
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ─── Shared UI components ───────────────────────────────────────── */
+  .input-bar {
+    padding: 20px 32px;
+    border-bottom: 1px solid #ddd5c8;
+    background: #faf6ef;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+  .tab-intro {
+    padding: 16px 32px 0;
+    font-size: 13px;
+    color: #6b6560;
+    line-height: 1.5;
+  }
+  .tab-intro strong { color: #1a1714; }
+  .input-bar select {
+    background: #fff;
+    color: #2d2a24;
+    border: 1px solid #ccc4b8;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .input-bar input[type="text"] {
+    flex: 1;
+    background: #fff;
+    color: #2d2a24;
+    border: 1px solid #ccc4b8;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 14px;
+    outline: none;
+  }
+  .input-bar input:focus { border-color: #b8845f; }
+  .input-bar button {
+    background: #c47a4a;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 24px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .input-bar button:hover { background: #a8663c; }
+  .input-bar button:disabled { background: #c4bdb3; cursor: not-allowed; }
+  .input-bar .stop-btn { background: #fff; color: #b85c4a; border: 1.5px solid #b85c4a; }
+  .input-bar .stop-btn:hover { background: #fdf2f2; }
+  .input-bar label {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 13px; color: #8a8078; cursor: pointer; white-space: nowrap;
+  }
+
+  .status-bar {
+    padding: 12px 32px;
+    font-size: 13px;
+    color: #8a8078;
+    display: none;
+  }
+  .status-bar.visible { display: block; }
+  .spinner {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid #ddd5c8;
+    border-top-color: #c47a4a;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    vertical-align: middle;
+    margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ─── About tab ──────────────────────────────────────────────────── */
+  .about-section {
+    padding: 32px;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  .about-section h2 {
+    font-size: 18px;
+    color: #1a1714;
+    margin-bottom: 12px;
+    margin-top: 32px;
+  }
+  .about-section h2:first-child { margin-top: 0; }
+  .about-section p {
+    font-size: 14px;
+    line-height: 1.7;
+    color: #4d4a44;
+    margin-bottom: 12px;
+  }
+
+  /* Flow diagrams */
+  .flow-diagram {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin: 20px 0;
+    flex-wrap: wrap;
+  }
+  .flow-box {
+    padding: 12px 18px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+    min-width: 100px;
+  }
+  .flow-box.user { background: #e8e4dc; color: #4d4a44; border: 1px solid #ccc4b8; }
+  .flow-box.llm { background: #faf6ef; color: #1a1714; border: 1px solid #ccc4b8; }
+  .flow-box.ydc { background: #e0f2e0; color: #2d6b2d; border: 1px solid #b8deb8; }
+  .flow-box.native { background: #e8e0f2; color: #5b3d8f; border: 1px solid #c8b8e8; }
+  .flow-box.judge { background: #fef3e0; color: #8a6520; border: 1px solid #e8d4a8; }
+  .flow-box.answer { background: #fff; color: #1a1714; border: 1px solid #ccc4b8; }
+  .flow-arrow {
+    font-size: 18px;
+    color: #b0a898;
+    padding: 0 8px;
+    line-height: 1;
+  }
+
+  /* Model table */
+  .model-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #ddd5c8;
+    font-size: 13px;
+    margin: 16px 0;
+  }
+  .model-table th {
+    text-align: left;
+    padding: 10px 14px;
+    background: #faf6ef;
+    border-bottom: 1px solid #ddd5c8;
+    font-weight: 600;
+    font-size: 12px;
+    color: #6b6560;
+  }
+  .model-table td {
+    padding: 9px 14px;
+    border-bottom: 1px solid #eee8df;
+    color: #4d4a44;
+  }
+  .model-table tr:last-child td { border-bottom: none; }
+  .model-table code {
+    background: #f5f0e8;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+
+  /* Code architecture */
+  .arch-tree {
+    background: #fff;
+    border: 1px solid #ddd5c8;
+    border-radius: 8px;
+    padding: 20px 24px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 13px;
+    line-height: 1.8;
+    color: #4d4a44;
+    margin: 16px 0;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .arch-tree .comment { color: #a09888; }
+  .arch-tree .highlight { color: #c47a4a; font-weight: 600; }
+  .arch-tree .file { color: #2d6b2d; }
+
+  /* ─── Grounding tab ──────────────────────────────────────────────── */
+  .trace-container {
+    padding: 24px 32px;
+  }
+  .trace-timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .trace-step {
+    display: flex;
+    gap: 16px;
+    padding: 12px 0;
+    border-left: 3px solid #ddd5c8;
+    margin-left: 12px;
+    padding-left: 20px;
+    position: relative;
+    animation: fadeIn 0.3s ease;
+  }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .trace-step::before {
+    content: '';
+    position: absolute;
+    left: -7px; top: 16px;
+    width: 11px; height: 11px;
+    border-radius: 50%;
+    background: #ddd5c8;
+    border: 2px solid #f5f0e8;
+  }
+  .trace-step.step-init::before { background: #8a8078; }
+  .trace-step.step-search::before { background: #c47a4a; }
+  .trace-step.step-result::before { background: #2d6b2d; }
+  .trace-step.step-answer::before { background: #1a1714; }
+  .trace-step.step-done::before { background: #2d6b2d; border-color: #2d6b2d; }
+  .trace-step.step-error::before { background: #8b3232; }
+  .trace-step.step-error {
+    background: #fdf2f2;
+    border-left-color: #c0392b;
+    border-radius: 0 6px 6px 0;
+    padding-top: 10px; padding-bottom: 10px;
+  }
+  .trace-step.step-error .trace-detail { color: #7a1f1f; font-weight: 500; }
+
+  .trace-content { flex: 1; }
+  .trace-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
+  .trace-label.label-init { color: #8a8078; }
+  .trace-label.label-search { color: #c47a4a; }
+  .trace-label.label-result { color: #2d6b2d; }
+  .trace-label.label-answer { color: #1a1714; }
+  .trace-label.label-done { color: #2d6b2d; }
+  .trace-label.label-error { color: #8b3232; }
+
+  .trace-detail {
+    font-size: 13px;
+    line-height: 1.6;
+    color: #4d4a44;
+  }
+  .trace-detail code {
+    background: #f5f0e8;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+  .trace-answer-box {
+    background: #fff;
+    border: 1px solid #ddd5c8;
+    border-radius: 8px;
+    padding: 16px 20px;
+    font-size: 13px;
+    line-height: 1.7;
+    color: #3d3830;
+    word-wrap: break-word;
+    max-height: 500px;
+    overflow-y: auto;
+    margin-top: 8px;
+  }
+  /* trace-answer-box markdown styles are shared above with .answer-content */
+  .trace-sources {
+    margin-top: 8px;
+    font-size: 12px;
+  }
+  .trace-sources a { color: #b8845f; text-decoration: none; }
+  .trace-sources a:hover { text-decoration: underline; }
+  .trace-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin-top: 8px;
+  }
+  .stat-card {
+    background: #fff;
+    border: 1px solid #ddd5c8;
+    border-radius: 8px;
+    padding: 12px 14px;
+    text-align: center;
+  }
+  .stat-card .stat-value { font-size: 18px; font-weight: 700; color: #1a1714; }
+  .stat-card .stat-label { font-size: 11px; color: #8a8078; margin-top: 2px; }
+
+  /* ─── Comparison tab (ported from existing) ──────────────────────── */
+  .savings-bar {
+    padding: 14px 32px;
+    background: #e8f5e8;
+    border-bottom: 1px solid #c4dfc4;
+    font-size: 14px;
+    color: #2d6b2d;
+    font-weight: 600;
+    display: none;
+  }
+  .savings-bar.visible { display: block; }
+  .savings-bar.negative { background: #f5e8e8; border-color: #dfc4c4; color: #8b3232; }
+
+  .answers {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    border-bottom: 1px solid #ddd5c8;
+  }
+  .answer-pane {
+    border-right: 1px solid #ddd5c8;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    opacity: 0.4;
+    transition: opacity 0.4s ease;
+    min-width: 0;       /* prevent grid column blowout from long content */
+    overflow: hidden;
+  }
+  .answer-pane.loaded { opacity: 1; }
+  .answer-pane:last-child { border-right: none; }
+  .answer-pane .pane-header {
+    padding: 14px 20px;
+    background: #faf6ef;
+    border-bottom: 1px solid #ddd5c8;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .answer-pane .pane-header h3 { font-size: 14px; font-weight: 600; color: #1a1714; }
+  .badge {
+    font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: 600;
+  }
+  .badge-ydc { background: #e0f2e0; color: #2d6b2d; }
+  .badge-native { background: #e8e0f2; color: #5b3d8f; }
+  .badge-plx { background: #dff3f0; color: #0e7a6a; }
+
+  table.metric-table th.col-plx { color: #0e7a6a; }
+  table.metric-table td.val-plx { font-weight: 600; color: #0e7a6a; position: relative; }
+  table.metric-table td.val-plx::after {
+    content: ''; position: absolute; left: 0; top: 4px; bottom: 4px;
+    width: 3px; border-radius: 0 2px 2px 0; opacity: 0.3;
+    background: #0e7a6a;
+  }
+  table.metric-table td.val-plx.winner::after { opacity: 1; }
+
+  .verdict-perplexity { background: #dff3f0; color: #0e7a6a; border: 1px solid #b8dcd8; }
+
+  .answer-content {
+    padding: 16px 20px;
+    font-size: 13px; line-height: 1.7;
+    max-height: 500px; overflow-y: auto; overflow-x: auto;
+    word-wrap: break-word;
+    flex: 1; color: #3d3830;
+  }
+  /* Shared markdown rendering styles for both tabs */
+  .answer-content p, .trace-answer-box p { margin: 0 0 10px 0; }
+  .answer-content p:last-child, .trace-answer-box p:last-child { margin-bottom: 0; }
+  .answer-content hr, .trace-answer-box hr { border: none; border-top: 1px solid #ddd5c8; margin: 12px 0; }
+  .answer-content sup.cite, .trace-answer-box sup.cite { font-size: 10px; color: #c47a4a; }
+  .answer-content strong, .trace-answer-box strong { font-weight: 600; }
+  .answer-content code, .trace-answer-box code { background: #f5f0e8; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+  .answer-content h1, .trace-answer-box h1 { font-size: 18px; font-weight: 700; margin: 16px 0 8px 0; color: #1a1714; }
+  .answer-content h2, .trace-answer-box h2 { font-size: 16px; font-weight: 700; margin: 14px 0 6px 0; color: #1a1714; }
+  .answer-content h3, .trace-answer-box h3 { font-size: 14px; font-weight: 700; margin: 12px 0 4px 0; color: #1a1714; }
+  .answer-content h4, .trace-answer-box h4 { font-size: 13px; font-weight: 700; margin: 10px 0 4px 0; color: #1a1714; }
+  .answer-content ol, .trace-answer-box ol { margin: 8px 0; padding-left: 24px; }
+  .answer-content ul, .trace-answer-box ul { margin: 8px 0; padding-left: 20px; list-style: disc; }
+  .answer-content li, .trace-answer-box li { margin: 4px 0; }
+  .answer-content a, .trace-answer-box a { color: #c47a4a; text-decoration: underline; }
+  /* Shared scrollbar style for all scrollable content */
+  .answer-content::-webkit-scrollbar,
+  .trace-answer-box::-webkit-scrollbar { width: 6px; height: 6px; }
+  .answer-content::-webkit-scrollbar-track,
+  .trace-answer-box::-webkit-scrollbar-track { background: #f5f0e8; }
+  .answer-content::-webkit-scrollbar-thumb,
+  .trace-answer-box::-webkit-scrollbar-thumb { background: #ccc4b8; border-radius: 3px; }
+
+  .pane-waiting {
+    padding: 24px 20px; color: #b0a898; font-size: 13px; font-style: italic;
+    flex: 1; display: flex; align-items: center; gap: 8px;
+  }
+  .pane-waiting .mini-spinner {
+    display: inline-block; width: 12px; height: 12px;
+    border: 2px solid #ddd5c8; border-top-color: #c47a4a;
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+  }
+  .progress-wrap { display: none; border-top: 1px dashed #e8e0d5; }
+  .progress-wrap.visible { display: block; }
+  .progress-toggle {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 20px; cursor: pointer; user-select: none;
+    font-size: 11px; color: #8a8078; background: #faf6ef;
+    border: none; width: 100%; text-align: left; font-weight: 500;
+  }
+  .progress-toggle:hover { color: #5a5248; background: #f0ebe2; }
+  .progress-toggle .arrow { transition: transform 0.2s; display: inline-block; font-size: 9px; }
+  .progress-toggle .log-count { color: #b0a898; font-weight: 400; margin-left: 4px; }
+  .progress-wrap.collapsed .arrow { transform: rotate(-90deg); }
+  .progress-wrap.collapsed .progress-log { display: none !important; }
+  .progress-log {
+    padding: 4px 20px 10px;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 11px; line-height: 1.6; color: #8a8078;
+    max-height: 140px; overflow-y: auto;
+  }
+  .progress-log .log-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .progress-log .log-line::before { content: ">"; color: #c47a4a; margin-right: 6px; font-weight: 600; }
+
+  .sources {
+    padding: 12px 20px; border-top: 1px solid #ddd5c8;
+    background: #faf6ef; font-size: 12px; max-height: 120px; overflow-y: auto;
+  }
+  .sources a { color: #b8845f; text-decoration: none; }
+  .sources a:hover { text-decoration: underline; }
+
+  .metrics-section {
+    padding: 24px 32px; border-bottom: 1px solid #ddd5c8; display: none;
+  }
+  .metrics-section.visible { display: block; }
+  .metrics-section h2 { font-size: 16px; margin-bottom: 16px; color: #1a1714; }
+
+  .tables-row {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 20px;
+  }
+  .metric-table-wrap h3 {
+    font-size: 13px; font-weight: 600; color: #8a8078;
+    text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;
+  }
+
+  table.metric-table {
+    width: 100%; border-collapse: collapse; background: #fff;
+    border-radius: 8px; overflow: hidden; border: 1px solid #ddd5c8; font-size: 13px;
+  }
+  table.metric-table th {
+    text-align: left; padding: 10px 14px; background: #faf6ef;
+    border-bottom: 1px solid #ddd5c8; font-weight: 600; font-size: 12px; color: #6b6560;
+  }
+  table.metric-table th.col-ydc { color: #2d6b2d; }
+  table.metric-table th.col-native { color: #5b3d8f; }
+  table.metric-table th.col-ratio { color: #8a8078; font-weight: 500; text-align: right; }
+  table.metric-table td { padding: 9px 14px; border-bottom: 1px solid #eee8df; }
+  table.metric-table tr:last-child td { border-bottom: none; }
+  table.metric-table td.row-label { color: #6b6560; font-weight: 500; }
+  table.metric-table td.val-ydc { font-weight: 600; color: #2d6b2d; position: relative; }
+  table.metric-table td.val-native { font-weight: 600; color: #5b3d8f; position: relative; }
+  table.metric-table td.val-ydc::after,
+  table.metric-table td.val-native::after {
+    content: ''; position: absolute; left: 0; top: 4px; bottom: 4px;
+    width: 3px; border-radius: 0 2px 2px 0; opacity: 0.3;
+  }
+  table.metric-table td.val-ydc::after { background: #2d6b2d; }
+  table.metric-table td.val-native::after { background: #5b3d8f; }
+  table.metric-table td.winner { font-weight: 700; }
+  table.metric-table td.winner::after { opacity: 1; }
+  table.metric-table td.ratio-cell { text-align: right; font-size: 12px; color: #8a8078; font-weight: 500; }
+  table.metric-table td.ratio-cell.ratio-good { color: #2d6b2d; }
+  table.metric-table td.ratio-cell.ratio-bad { color: #8b3232; }
+
+  .cost-footnote { margin-top: 14px; font-size: 11px; color: #a09888; line-height: 1.6; }
+
+  .cost-clickable { cursor: pointer; text-decoration: underline dotted #b0a090; }
+  .cost-clickable:hover { color: #6b4f9e; }
+
+  /* ── Code info button ───────────────────────────────────────── */
+  .info-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: #ede6d8; border: 1px solid #ccc4b4;
+    color: #6b5f56; font-size: 10px; font-weight: 700;
+    cursor: pointer; vertical-align: middle; margin-left: 7px;
+    flex-shrink: 0; line-height: 1; transition: background 0.15s;
+  }
+  .info-btn:hover { background: #6b4f9e; color: #fff; border-color: #6b4f9e; }
+
+  /* info-btn inside an input bar — match bar element height, drop the circle look */
+  .input-bar .info-btn {
+    width: auto; height: auto;
+    border-radius: 8px;
+    padding: 10px 13px;
+    font-size: 13px; font-weight: 500;
+    margin-left: 0;
+    background: #f0ebe2; border-color: #ccc4b8;
+    color: #6b5f56; letter-spacing: 0.02em;
+  }
+  .input-bar .info-btn:hover { background: #6b4f9e; color: #fff; border-color: #6b4f9e; }
+
+  /* ── Code info modal ────────────────────────────────────────── */
+  #codeInfoOverlay {
+    display: none; position: fixed; inset: 0; z-index: 10000;
+    background: rgba(0,0,0,0.35); align-items: center; justify-content: center;
+  }
+  #codeInfoOverlay.visible { display: flex; }
+  #codeInfoModal {
+    background: #faf6ef; border-radius: 14px;
+    box-shadow: 0 12px 48px rgba(0,0,0,0.18);
+    border: 1px solid #ddd5c8;
+    max-width: 800px; width: calc(100vw - 48px);
+    max-height: calc(100vh - 80px); overflow-y: auto;
+    padding: 28px 32px 24px;
+    font-size: 13px; color: #2d2a24; position: relative;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  #codeInfoModal h3 { font-size: 16px; font-weight: 700; color: #1a1714; margin: 0 0 4px; }
+  #codeInfoModal .info-file {
+    font-size: 11px; color: #8a8078; font-family: monospace;
+    background: #ede8df; padding: 3px 8px; border-radius: 4px;
+    display: inline-block; margin-bottom: 14px;
+  }
+  #codeInfoModal .info-api {
+    background: #f0ebe2; border-left: 3px solid #c47a4a;
+    padding: 8px 12px; border-radius: 0 6px 6px 0;
+    margin-bottom: 18px; font-size: 12px; color: #6b6560;
+  }
+  #codeInfoModal h4 {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.07em; color: #8a8078; margin: 18px 0 8px;
+  }
+  #codeInfoModal table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  #codeInfoModal table th {
+    text-align: left; padding: 6px 10px; background: #f5f0e8;
+    border-bottom: 2px solid #ddd5c8; color: #6b6560; font-weight: 600;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  #codeInfoModal table td { padding: 7px 10px; border-bottom: 1px solid #e8e0d4; vertical-align: top; }
+  #codeInfoModal table tr:last-child td { border-bottom: none; }
+  #codeInfoModal table td:first-child { font-weight: 600; color: #1a1714; white-space: nowrap; width: 30%; }
+  #codeInfoModal table td:nth-child(2) { font-family: monospace; color: #6b4f9e; background: #ede8df; width: 25%; }
+  #codeInfoModal table td:nth-child(3) { color: #6b6560; }
+  #codeInfoModal .info-alts { list-style: none; padding: 0; margin: 0; }
+  #codeInfoModal .info-alts li {
+    padding: 6px 0 6px 18px; border-bottom: 1px solid #e8e0d4;
+    position: relative; color: #4d4a44; font-size: 12px;
+  }
+  #codeInfoModal .info-alts li:before {
+    content: '→'; position: absolute; left: 0; color: #c47a4a;
+  }
+  #codeInfoModal .info-alts li:last-child { border-bottom: none; }
+  #codeInfoModal .info-close {
+    position: absolute; top: 16px; right: 20px;
+    cursor: pointer; font-size: 20px; color: #8a8078; line-height: 1;
+    background: none; border: none; padding: 4px;
+  }
+  #codeInfoModal .info-close:hover { color: #1a1714; }
+  .info-tabs {
+    display: flex; gap: 0; border-bottom: 2px solid #ddd5c8;
+    margin: 14px 0 0;
+  }
+  .info-tab {
+    padding: 8px 20px; font-size: 12px; font-weight: 600; cursor: pointer;
+    color: #8a8078; border: none; border-bottom: 3px solid transparent;
+    margin-bottom: -2px; background: none; font-family: inherit;
+    transition: color 0.15s;
+  }
+  .info-tab.active { color: #c47a4a; border-bottom-color: #c47a4a; }
+  .info-tab:hover:not(.active) { color: #4d4a44; }
+  .info-tab-panel { display: none; padding-top: 14px; }
+  .info-tab-panel.active { display: block; }
+
+  #costPopup {
+    display: none;
+    position: fixed;
+    z-index: 9999;
+    background: #fff;
+    border: 1px solid #d5cbbe;
+    border-radius: 10px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.13);
+    padding: 16px 20px;
+    min-width: 320px;
+    max-width: 420px;
+    font-size: 13px;
+    line-height: 1.7;
+    color: #2a2520;
+  }
+  #costPopup.visible { display: block; }
+  #costPopup h4 {
+    font-size: 13px; font-weight: 700; margin: 0 0 10px;
+    color: #1a1714; border-bottom: 1px solid #ede6d8; padding-bottom: 8px;
+  }
+  #costPopup .popup-section { margin-bottom: 10px; }
+  #costPopup .popup-section-label {
+    font-weight: 600; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.06em; color: #9a8878; margin-bottom: 4px;
+  }
+  #costPopup .popup-line { display: flex; justify-content: space-between; gap: 16px; }
+  #costPopup .popup-line .desc { color: #6a5f56; }
+  #costPopup .popup-line .val { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #costPopup .popup-total {
+    border-top: 1px solid #ede6d8; margin-top: 8px; padding-top: 8px;
+    font-weight: 700; display: flex; justify-content: space-between;
+  }
+  #costPopup .popup-close {
+    position: absolute; top: 10px; right: 14px;
+    cursor: pointer; font-size: 16px; color: #9a8878; line-height: 1;
+  }
+  #costPopup .popup-close:hover { color: #2a2520; }
+
+  .glossary {
+    padding: 24px 32px; border-top: 1px solid #ddd5c8;
+    background: #faf6ef; margin-top: 8px;
+  }
+  .glossary h2 { font-size: 14px; color: #1a1714; margin-bottom: 12px; font-weight: 600; }
+  .glossary dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 12px; line-height: 1.5; }
+  .glossary dt { color: #3d3830; font-weight: 600; white-space: nowrap; }
+  .glossary dd { color: #6b6359; margin: 0; }
+
+  .judge {
+    padding: 24px 32px; border-bottom: 1px solid #ddd5c8; display: none;
+  }
+  .judge.visible { display: block; }
+  .judge h2 { font-size: 16px; margin-bottom: 16px; color: #1a1714; }
+
+  .verdict-bar {
+    margin-bottom: 16px; padding: 12px 16px; border-radius: 8px;
+    font-size: 14px; font-weight: 600; text-align: center;
+  }
+  .verdict-comparable { background: #e8f0e8; color: #3d6b3d; border: 1px solid #c4dfc4; }
+  .verdict-youdotcom { background: #e0f2e0; color: #2d6b2d; border: 1px solid #b8deb8; }
+  .verdict-native { background: #e8e0f2; color: #5b3d8f; border: 1px solid #c8b8e8; }
+
+  .judge-content { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .judge-reasoning {
+    background: #fff; border-radius: 8px; padding: 16px; border: 1px solid #ddd5c8;
+    font-size: 13px; line-height: 1.7; color: #4d4a44;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .judge-reasoning h3 {
+    font-size: 13px; font-weight: 600; color: #8a8078;
+    text-transform: uppercase; letter-spacing: 0.5px; margin: 0;
+  }
+  .judge-reasoning strong { color: #1a1714; }
+  .judge-meta { font-size: 12px; color: #8a8078; margin-top: 12px; }
+
+  /* ─── Diagram zoom overlay ───────────────────────────────────────── */
+  .diagram-wrap {
+    position: relative; cursor: zoom-in;
+  }
+  .diagram-wrap::after {
+    content: '⤢ click to enlarge';
+    position: absolute; bottom: 10px; right: 12px;
+    font-size: 11px; color: #a09888; background: rgba(255,255,255,0.85);
+    padding: 3px 8px; border-radius: 4px; pointer-events: none;
+    border: 1px solid #e0d8cc;
+  }
+  .diagram-wrap:hover::after { color: #6b4f9e; border-color: #c8b8e8; }
+  #diagramOverlay {
+    display: none; position: fixed; inset: 0; z-index: 10001;
+    background: rgba(0,0,0,0.5); align-items: center; justify-content: center;
+  }
+  #diagramOverlay.visible { display: flex; }
+  #diagramModalBox {
+    background: #fff; border-radius: 12px;
+    box-shadow: 0 16px 60px rgba(0,0,0,0.25);
+    width: 80vw; max-height: 88vh;
+    overflow: auto; position: relative; padding: 28px 28px 20px;
+  }
+  #diagramModalBox svg { display: block; width: 100%; }
+  #diagramCloseBtn {
+    position: absolute; top: 14px; right: 18px;
+    background: none; border: none; cursor: pointer;
+    font-size: 22px; color: #8a8078; line-height: 1; padding: 4px;
+  }
+  #diagramCloseBtn:hover { color: #1a1714; }
+
+  /* ─── Multi-Model YDC tab ───────────────────────────────────────── */
+  .multi-model-selects {
+    display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+  }
+  .multi-model-selects .select-label {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.05em; color: #a09888; white-space: nowrap;
+  }
+  .multi-model-selects .select-sep {
+    font-size: 13px; color: #ccc4b8;
+  }
+
+  .multi-answers {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0;
+    border-bottom: 1px solid #ddd5c8;
+  }
+
+  /* Slot color palette */
+  table.metric-table th.col-m0 { color: #2d6b2d; }
+  table.metric-table th.col-m1 { color: #5b3d8f; }
+  table.metric-table th.col-m2 { color: #0e7a6a; }
+  table.metric-table td.val-m0 { font-weight: 600; color: #2d6b2d; position: relative; }
+  table.metric-table td.val-m1 { font-weight: 600; color: #5b3d8f; position: relative; }
+  table.metric-table td.val-m2 { font-weight: 600; color: #0e7a6a; position: relative; }
+  table.metric-table td.val-m0::after { content:''; position:absolute; left:0; top:4px; bottom:4px; width:3px; border-radius:0 2px 2px 0; opacity:0.3; background:#2d6b2d; }
+  table.metric-table td.val-m1::after { content:''; position:absolute; left:0; top:4px; bottom:4px; width:3px; border-radius:0 2px 2px 0; opacity:0.3; background:#5b3d8f; }
+  table.metric-table td.val-m2::after { content:''; position:absolute; left:0; top:4px; bottom:4px; width:3px; border-radius:0 2px 2px 0; opacity:0.3; background:#0e7a6a; }
+  table.metric-table td.val-m0.winner::after,
+  table.metric-table td.val-m1.winner::after,
+  table.metric-table td.val-m2.winner::after { opacity: 1; }
+  table.metric-table td.val-m0.winner,
+  table.metric-table td.val-m1.winner,
+  table.metric-table td.val-m2.winner { font-weight: 700; }
+
+  .multi-metrics .tables-row {
+    grid-template-columns: 1fr;
+  }
+  .multi-metrics table.metric-table th,
+  .multi-metrics table.metric-table td { font-size: 12px; padding: 8px 12px; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- HEADER + TABS                                                      -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div class="header">
+  <h1>You.com Web Search API for LLMs — Live Demo</h1>
+  <div class="subtitle">Give any LLM real-time web search. See the results. Compare the cost.</div>
+  <div class="tab-bar">
+    <button class="tab-btn active" onclick="switchTab('about')">About</button>
+    <button class="tab-btn" onclick="switchTab('playground')">LLM + You.com Playground</button>
+    <button class="tab-btn" onclick="switchTab('comparison')">You.com vs. Native Search</button>
+    <button class="tab-btn" onclick="switchTab('multimodel')">Multi-Model You.com</button>
+    <button class="tab-btn" onclick="switchTab('sac')">You.com vs. Perplexity Agent API</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- ABOUT TAB                                                          -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div class="tab-panel active" id="tab-about">
+<div class="about-section">
+
+  <h2>What This Is</h2>
+  <p>
+    This tool demonstrates how to <strong>ground LLMs with real-time web search</strong> using
+    <a href="https://you.com/platform" style="color:#c47a4a">You.com's Search API</a>.
+    It has two modes: <strong>LLM + You.com Playground</strong> (run a single query through any LLM + You.com Search and see every step)
+    and <strong>You.com vs. Native Search</strong> (prove that You.com Search is cheaper and comparable quality
+    vs. each provider's built-in native web search).
+  </p>
+
+  <h2>How It Works — Playground</h2>
+  <p>The LLM decides when and what to search. You.com handles the retrieval.</p>
+  <div class="flow-diagram">
+    <div class="flow-box user">User Query</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box llm">LLM<br><small style="font-weight:400;font-size:11px">(any of 5 models)</small></div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box ydc">You.com Search API<br><small style="font-weight:400;font-size:11px">ydc-index.io/v1/search</small></div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box llm">LLM synthesizes</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box answer">Grounded Answer<br><small style="font-weight:400;font-size:11px">with citations</small></div>
+  </div>
+
+  <h2>How It Works — You.com vs. Native Search</h2>
+  <p>Same query, same LLM, two different search backends — then a blind cross-model judge.</p>
+  <div class="flow-diagram">
+    <div class="flow-box user">User Query</div>
+    <span class="flow-arrow">→</span>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div class="flow-box ydc">Path A: LLM + You.com Search</div>
+      <div class="flow-box native">Path B: LLM + Native Web Search</div>
+    </div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box judge">Blind Judge<br><small style="font-weight:400;font-size:11px">cross-model, A/B randomized</small></div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box answer">Verdict + Scores</div>
+  </div>
+
+  <h2>Supported Models</h2>
+  <table class="model-table" id="supportedModelsTable">
+    <thead>
+      <tr><th>Key</th><th>Model</th><th>Vendor</th><th>Available In</th><th>Links</th></tr>
+    </thead>
+    <tbody id="supportedModelsBody">
+      <tr><td colspan="5" style="color:#8a8078;font-style:italic">Loading…</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Cost Reference</h2>
+  <table class="model-table" id="costReferenceTable">
+    <thead>
+      <tr><th>Item</th><th>Price</th><th>Notes</th></tr>
+    </thead>
+    <tbody id="costReferenceBody">
+      <tr><td colspan="3" style="color:#8a8078;font-style:italic">Loading…</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Code Architecture</h2>
+  <div class="arch-tree"><span class="highlight">use-cases/</span>
+├── <span class="highlight">grounding/</span>              <span class="comment"># Standalone — these files work without the rest</span>
+│   ├── <span class="file">run.py</span>               <span class="comment"># Entry point: GROUNDING_MODELS config, client + agent factory, CLI + generator API</span>
+│   ├── <span class="file">base_agent.py</span>        <span class="comment"># Tool-use loops by API shape: AnthropicAgent, OpenAIResponsesAgent, OpenAICompatibleAgent</span>
+│   ├── <span class="file">search_tool.py</span>       <span class="comment"># You.com Search: execute_search(), tool schemas for all 3 API shapes, extract_urls()</span>
+│   ├── <span class="highlight">agents/</span>              <span class="comment"># Per-provider wrappers (client setup, model defaults, key resolution)</span>
+│   │   ├── <span class="file">claude_agent.py</span>      <span class="comment"># → AnthropicAgent</span>
+│   │   ├── <span class="file">openai_agent.py</span>      <span class="comment"># → OpenAIResponsesAgent or OpenAICompatibleAgent (factory fn)</span>
+│   │   ├── <span class="file">qwen_agent.py</span>        <span class="comment"># → OpenAIResponsesAgent or OpenAICompatibleAgent (factory fn)</span>
+│   │   ├── <span class="file">kimi_agent.py</span>        <span class="comment"># → OpenAICompatibleAgent (Moonshot /v1/responses is 404)</span>
+│   │   └── <span class="file">llama_agent.py</span>       <span class="comment"># → OpenAICompatibleAgent (Together AI or Ollama)</span>
+│   ├── <span class="file">demo.py</span>              <span class="comment"># Interactive chat demo</span>
+│   └── <span class="file">env.txt</span>              <span class="comment"># API key template</span>
+├── <span class="highlight">comparison/</span>             <span class="comment"># You.com vs. native search comparison</span>
+│   ├── <span class="file">compare.py</span>           <span class="comment"># Core: run_youdotcom(), run_native(), run_judge(), calculate_costs()</span>
+│   ├── <span class="file">pricing.json</span>         <span class="comment"># Single source of truth for all model pricing, API shapes, and cost history</span>
+│   ├── <span class="file">benchmark_runner.py</span>  <span class="comment"># Run 50-question benchmarks, output JSON results</span>
+│   ├── <span class="file">perplexity_runner.py</span> <span class="comment"># Perplexity Agent API (SaC) runner — used by /api/sac-compare</span>
+│   └── <span class="file">ydc_research_runner.py</span> <span class="comment"># You.com Research API runner — used by /api/sac-compare</span>
+├── <span class="highlight">app/</span>                    <span class="comment"># Web UI — thin HTTP layer on top of grounding/ and comparison/</span>
+│   ├── <span class="file">server.py</span>            <span class="comment"># HTTP server, SSE streaming — imports from run.py and compare.py, no loop logic</span>
+│   └── <span class="file">index.html</span>           <span class="comment"># 5-tab UI (About, Playground, Comparison, Multi-Model, SaC)</span>
+└── <span class="highlight">decisions/</span>             <span class="comment"># ADRs: documented experiments and choices (system prompt, search params, API shape)</span></div>
+  <p>
+    <strong>Design principle:</strong> CLI modules are standalone and work without the UI.
+    The server is a thin HTTP wrapper that imports from <code>run.py</code> and <code>compare.py</code>.
+    <strong>Adding a new model</strong> from an <em>existing</em> provider (e.g. a new Claude or GPT version) = one entry in <code>comparison/pricing.json</code> + one entry in <code>grounding/run.py</code> GROUNDING_MODELS. Set <code>api_shape</code> to match the provider's loop class (<code>"anthropic"</code>, <code>"responses"</code>, or <code>"chat_completions"</code>) and <code>compare.py</code> picks it up automatically.
+    <strong>Adding a brand-new provider</strong> = new agent file in <code>grounding/agents/</code> that inherits the right base class from <code>base_agent.py</code> + <code>_create_client()</code> branch in <code>compare.py</code> + entries in pricing.json and GROUNDING_MODELS. No loop logic needed — it lives in <code>base_agent.py</code>.
+  </p>
+
+  <h2>Playground Data Flow</h2>
+  <p style="font-size:13px;color:#6b6560;margin-bottom:16px">Control and data path when you click <strong>Run</strong> in the LLM + You.com Playground. Each arrow is a real function call or network request.</p>
+
+  <div class="diagram-wrap" onclick="openDiagram()">
+  <svg viewBox="0 0 960 535" xmlns="http://www.w3.org/2000/svg" width="100%" style="display:block;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+    <defs>
+      <marker id="ah-orange"  markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0,7 2.5,0 5" fill="#c47a4a"/></marker>
+      <marker id="ah-green"   markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0,7 2.5,0 5" fill="#2d6b2d"/></marker>
+      <marker id="ah-grey"    markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0,7 2.5,0 5" fill="#8a8078"/></marker>
+      <marker id="ah-purple"  markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0,7 2.5,0 5" fill="#5b3d8f"/></marker>
+      <marker id="ah-dkgreen" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0,7 2.5,0 5" fill="#2d6b2d"/></marker>
+    </defs>
+
+    <!-- Layout:
+         Row 1 (y=10..165):  Browser(0..148) · server.py(278..440) · run.py(506..700) · search_tool.py(756..956)
+         Row 2 (y=230..340): base_agent.py(506..700) · You.com Search API(756..956)
+         Row 3 (y=370..470): LLM Provider API(440..766, centered)
+         Legend (y=492..510)
+    -->
+
+    <!-- ── ROW 1 BOXES ── -->
+
+    <!-- Box 1: Browser/index.html -->
+    <rect x="1"   y="10" width="147" height="155" rx="7" fill="#faf6ef" stroke="#ccc4b8" stroke-width="1.5"/>
+    <text x="11"  y="28" font-size="9" font-weight="700" letter-spacing="0.8" fill="#a09888">BROWSER</text>
+    <text x="11"  y="47" font-size="13" font-weight="700" fill="#1a1714">index.html</text>
+    <text x="11"  y="65" font-size="10" fill="#6b6560" font-family="'SF Mono',Menlo,monospace">runGrounding()</text>
+    <text x="11"  y="80" font-size="10" fill="#6b6560" font-family="'SF Mono',Menlo,monospace">streamSSE()</text>
+    <text x="11"  y="95" font-size="10" fill="#6b6560" font-family="'SF Mono',Menlo,monospace">handleGrounding</text>
+    <text x="11" y="108" font-size="10" fill="#6b6560" font-family="'SF Mono',Menlo,monospace">  Event()</text>
+    <text x="11" y="128" font-size="10" fill="#a09888">reads SSE events,</text>
+    <text x="11" y="142" font-size="10" fill="#a09888">renders timeline</text>
+
+    <!-- Arrow 1a: POST → ; midpoint x=213 (148..278=130px gap) -->
+    <line x1="150" y1="68" x2="275" y2="68" stroke="#c47a4a" stroke-width="1.5" marker-end="url(#ah-orange)"/>
+    <text x="213" y="61" font-size="9" font-weight="600" fill="#c47a4a" text-anchor="middle">POST /api/grounding</text>
+    <text x="213" y="78" font-size="8.5" fill="#a09888" text-anchor="middle">{model, query}</text>
+
+    <!-- Arrow 1b: SSE ← -->
+    <line x1="277" y1="112" x2="152" y2="112" stroke="#2d6b2d" stroke-width="1.5" marker-end="url(#ah-green)"/>
+    <text x="213" y="105" font-size="9" font-weight="600" fill="#2d6b2d" text-anchor="middle">SSE stream ←</text>
+    <text x="213" y="122" font-size="8.5" fill="#a09888" text-anchor="middle">progress · answer · done</text>
+
+    <!-- Box 2: server.py (x=278..440) -->
+    <rect x="278" y="10" width="162" height="155" rx="7" fill="#fef9f0" stroke="#e0c898" stroke-width="1.5"/>
+    <text x="288" y="28" font-size="9" font-weight="700" letter-spacing="0.8" fill="#a09888">app/</text>
+    <text x="288" y="47" font-size="13" font-weight="700" fill="#1a1714">server.py</text>
+    <text x="288" y="65" font-size="10" fill="#6b6560" font-family="'SF Mono',Menlo,monospace">_handle_grounding()</text>
+    <text x="288" y="83" font-size="10" fill="#a09888">reads body,</text>
+    <text x="288" y="97" font-size="10" fill="#a09888">validates model key</text>
+    <text x="288" y="113" font-size="10" fill="#a09888">iterates generator →</text>
+    <text x="288" y="129" font-size="10" fill="#a09888">sends each event</text>
+    <text x="288" y="143" font-size="10" fill="#a09888">as SSE to browser</text>
+
+    <!-- Arrow 2: import + generator → ; midpoint x=473 (440..506=66px gap) -->
+    <line x1="442" y1="88" x2="503" y2="88" stroke="#8a8078" stroke-width="1.5" marker-end="url(#ah-grey)"/>
+    <text x="473" y="81" font-size="9" fill="#6b6560" text-anchor="middle">import +</text>
+    <text x="473" y="97" font-size="9" fill="#6b6560" text-anchor="middle">generator</text>
+
+    <!-- Box 3: run.py (x=506..700) -->
+    <rect x="506" y="10" width="194" height="155" rx="7" fill="#f0f8f0" stroke="#b8deb8" stroke-width="1.5"/>
+    <text x="516" y="28" font-size="9" font-weight="700" letter-spacing="0.8" fill="#a09888">grounding/</text>
+    <text x="516" y="47" font-size="13" font-weight="700" fill="#1a1714">run.py</text>
+    <text x="516" y="65" font-size="10" fill="#6b6560" font-family="'SF Mono',Menlo,monospace">run_grounding()</text>
+    <text x="516" y="80" font-size="10" fill="#6b6560" font-family="'SF Mono',Menlo,monospace">_create_client()</text>
+    <text x="516" y="95" font-size="10" fill="#6b6560" font-family="'SF Mono',Menlo,monospace">_create_agent()</text>
+    <text x="516" y="110" font-size="10" fill="#6b6560" font-family="'SF Mono',Menlo,monospace">agent.stream()</text>
+    <text x="516" y="128" font-size="10" fill="#a09888">yields: init, tool_call,</text>
+    <text x="516" y="142" font-size="10" fill="#a09888">search_result, answer, done</text>
+
+    <!-- Arrow 3: run.py imports from search_tool.py (set_interface, SYSTEM_PROMPT, is_verbose) -->
+    <!-- The loop itself runs in base_agent.py — run.py only uses search_tool for env/config imports -->
+    <line x1="702" y1="88" x2="753" y2="88" stroke="#8a8078" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#ah-grey)"/>
+    <text x="728" y="81" font-size="9" fill="#a09888" text-anchor="middle">imports</text>
+
+    <!-- Box 4: search_tool.py (x=756..956) -->
+    <rect x="756" y="10" width="200" height="155" rx="7" fill="#f0f8f0" stroke="#b8deb8" stroke-width="1.5"/>
+    <text x="766" y="28" font-size="9" font-weight="700" letter-spacing="0.8" fill="#a09888">grounding/</text>
+    <text x="766" y="47" font-size="13" font-weight="700" fill="#1a1714">search_tool.py</text>
+    <text x="766" y="65" font-size="10" fill="#6b6560" font-family="'SF Mono',Menlo,monospace">execute_search()</text>
+    <text x="766" y="80" font-size="10" fill="#6b6560" font-family="'SF Mono',Menlo,monospace">TOOL_SCHEMA</text>
+    <text x="766" y="95" font-size="10" fill="#6b6560" font-family="'SF Mono',Menlo,monospace">TOOL_SCHEMA_ANTHROPIC</text>
+    <text x="766" y="110" font-size="10" fill="#6b6560" font-family="'SF Mono',Menlo,monospace">TOOL_SCHEMA_RESPONSES</text>
+    <text x="766" y="125" font-size="10" fill="#6b6560" font-family="'SF Mono',Menlo,monospace">extract_urls()</text>
+
+    <!-- ── VERTICAL ARROWS + ROW 2 ── -->
+
+    <!-- Down: run.py center x=603 → base_agent.py -->
+    <line x1="603" y1="167" x2="603" y2="228" stroke="#8a8078" stroke-width="1.5" marker-end="url(#ah-grey)"/>
+    <text x="608" y="188" font-size="9" fill="#6b6560">instantiates</text>
+    <text x="608" y="201" font-size="8.5" fill="#a09888">AnthropicAgent /</text>
+    <text x="608" y="213" font-size="8.5" fill="#a09888">OpenAIResponsesAgent /</text>
+    <text x="608" y="225" font-size="8.5" fill="#a09888">OpenAICompatibleAgent</text>
+
+    <!-- Box 5: base_agent.py (x=506..700, center=603) — replaces old "LLM Provider API" position -->
+    <rect x="506" y="230" width="194" height="110" rx="7" fill="#f8f4ee" stroke="#d4c8b8" stroke-width="1.5"/>
+    <text x="516" y="248" font-size="9" font-weight="700" letter-spacing="0.8" fill="#a09888">grounding/</text>
+    <text x="516" y="265" font-size="13" font-weight="700" fill="#1a1714">base_agent.py</text>
+    <text x="516" y="282" font-size="10" fill="#6b6560" font-family="'SF Mono',Menlo,monospace">stream() loop</text>
+    <text x="516" y="297" font-size="10" fill="#a09888">owns all tool-use logic,</text>
+    <text x="516" y="311" font-size="10" fill="#a09888">calls execute_search(),</text>
+    <text x="516" y="325" font-size="10" fill="#a09888">calls LLM Provider API</text>
+
+    <!-- Down: base_agent.py → LLM Provider API -->
+    <line x1="603" y1="342" x2="603" y2="368" stroke="#5b3d8f" stroke-width="1.5" marker-end="url(#ah-purple)"/>
+
+    <!-- Box 5b: LLM Provider API (row 3, below base_agent.py) -->
+    <rect x="440" y="370" width="326" height="100" rx="7" fill="#f3eef8" stroke="#c8b8e8" stroke-width="1.5"/>
+    <text x="603" y="390" font-size="12" font-weight="700" fill="#5b3d8f" text-anchor="middle">LLM Provider API</text>
+    <text x="603" y="407" font-size="10" fill="#6b6560" text-anchor="middle">Anthropic Messages API (Claude)</text>
+    <text x="603" y="421" font-size="10" fill="#a09888" text-anchor="middle">OpenAI Responses API (GPT · Qwen default)</text>
+    <text x="603" y="435" font-size="10" fill="#a09888" text-anchor="middle">OpenAI Chat Completions (Kimi · Llama · fallback)</text>
+    <text x="603" y="458" font-size="9" fill="#8a8078" text-anchor="middle">responds: tool_use blocks or function_calls</text>
+
+    <!-- Arrow: base_agent.py → You.com Search API (execute_search, Row 2 horizontal) -->
+    <line x1="702" y1="285" x2="754" y2="285" stroke="#2d6b2d" stroke-width="1.5" marker-end="url(#ah-dkgreen)"/>
+    <text x="728" y="278" font-size="9" font-weight="600" fill="#2d6b2d" text-anchor="middle">execute_search()</text>
+
+    <!-- Down: search_tool.py center x=856 → YDC API -->
+    <line x1="856" y1="167" x2="856" y2="228" stroke="#2d6b2d" stroke-width="1.5" marker-end="url(#ah-dkgreen)"/>
+    <text x="861" y="190" font-size="9" font-weight="600" fill="#2d6b2d">HTTP POST</text>
+    <text x="861" y="204" font-size="8.5" fill="#a09888">api.you.com/v2/search</text>
+
+    <!-- Box 6: You.com Search API (x=756..956, center=856) -->
+    <rect x="756" y="230" width="200" height="110" rx="7" fill="#e8f5e8" stroke="#b8deb8" stroke-width="1.5"/>
+    <text x="856" y="253" font-size="12" font-weight="700" fill="#2d6b2d" text-anchor="middle">You.com Search API</text>
+    <text x="856" y="271" font-size="10" fill="#6b6560" text-anchor="middle">api.you.com/v2/search</text>
+    <text x="856" y="286" font-size="10" fill="#a09888" text-anchor="middle">YDC_API_KEY</text>
+    <text x="856" y="303" font-size="10" fill="#a09888" text-anchor="middle">returns: JSON snippets,</text>
+    <text x="856" y="317" font-size="10" fill="#a09888" text-anchor="middle">URLs, titles</text>
+
+    <!-- ── LEGEND ── -->
+    <line x1="1"   y1="492" x2="959" y2="492" stroke="#e8e0d4" stroke-width="1"/>
+    <line x1="10"  y1="505" x2="36"  y2="505" stroke="#c47a4a" stroke-width="1.5" marker-end="url(#ah-orange)"/>
+    <text x="42"   y="509" font-size="10" fill="#8a8078">HTTP / SSE (browser ↔ server)</text>
+    <line x1="230" y1="505" x2="256" y2="505" stroke="#8a8078" stroke-width="1.5" marker-end="url(#ah-grey)"/>
+    <text x="262"  y="509" font-size="10" fill="#8a8078">Python import / fn call</text>
+    <line x1="230" y1="519" x2="256" y2="519" stroke="#8a8078" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#ah-grey)"/>
+    <text x="262"  y="523" font-size="10" fill="#8a8078">Python import (config only)</text>
+    <line x1="460" y1="501" x2="460" y2="510" stroke="#5b3d8f" stroke-width="1.5" marker-end="url(#ah-purple)"/>
+    <text x="466"  y="509" font-size="10" fill="#8a8078">LLM API (HTTPS)</text>
+    <line x1="620" y1="501" x2="620" y2="510" stroke="#2d6b2d" stroke-width="1.5" marker-end="url(#ah-dkgreen)"/>
+    <text x="626"  y="509" font-size="10" fill="#8a8078">You.com API (HTTPS)</text>
+  </svg>
+  </div>
+
+  <h2>Core Files (standalone, no UI)</h2>
+  <p style="font-size:13px;color:#6b6560;margin-bottom:12px">To share the grounding logic without the web app, copy only these files from <code>use-cases/grounding/</code>. They work as a self-contained CLI tool — no server or browser required.</p>
+  <table class="model-table">
+    <thead><tr><th>File</th><th>Purpose</th><th>Required?</th></tr></thead>
+    <tbody>
+      <tr><td><code>grounding/run.py</code></td><td>Entry point — GROUNDING_MODELS config, client + agent factory, CLI runner, SSE-compatible generator</td><td>✅ Yes</td></tr>
+      <tr><td><code>grounding/base_agent.py</code></td><td>Tool-use loop implementations by API shape — <code>AnthropicAgent</code>, <code>OpenAIResponsesAgent</code>, <code>OpenAICompatibleAgent</code></td><td>✅ Yes</td></tr>
+      <tr><td><code>grounding/search_tool.py</code></td><td>You.com API integration — <code>execute_search()</code>, tool schemas for all three API shapes, <code>extract_urls()</code></td><td>✅ Yes</td></tr>
+      <tr><td><code>grounding/env.txt</code></td><td>API key template — copy to local, fill in keys</td><td>✅ Yes</td></tr>
+      <tr><td><code>grounding/requirements.txt</code></td><td>Dependencies: <code>anthropic openai requests python-dotenv</code></td><td>✅ Yes</td></tr>
+      <tr><td><code>grounding/agents/</code></td><td>Per-provider wrappers (client setup, model defaults, API key resolution) — thin layer over <code>base_agent.py</code>. For programmatic / standalone agent use; <code>run.py</code> instantiates base classes directly</td><td>⬜ No (optional)</td></tr>
+      <tr><td><code>grounding/demo.py</code></td><td>Interactive chat demo — not needed for programmatic use</td><td>⬜ No</td></tr>
+      <tr><td><code>app/server.py</code></td><td>HTTP server / SSE layer — only needed to run the web UI</td><td>⬜ No</td></tr>
+      <tr><td><code>app/index.html</code></td><td>Frontend — only needed to run the web UI</td><td>⬜ No</td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:12px;color:#8a8078;margin-top:8px">
+    Minimal usage: <code>cd use-cases/grounding</code> · <code>pip install -r requirements.txt</code> · add API keys to <code>env.txt</code> · <code>python run.py claude "your question"</code>
+  </p>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- GROUNDING TAB                                                      -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-playground">
+
+<div class="tab-intro">
+  <strong>LLM + You.com Playground</strong> — Pick a model, ask a question, and watch the LLM search the web in real time via You.com's Search API.
+</div>
+
+<div class="input-bar">
+  <div style="display:flex;align-items:center;gap:4px">
+    <select id="gModel"></select>
+    <button class="info-btn" onclick="showCompareInfo('ydc', document.getElementById('gModel').value)" title="How this model is wired up">ℹ</button>
+  </div>
+  <input type="text" id="gQuery" list="sampleQueries" placeholder="Ask a question or pick from 50 samples…"
+         value="What happened in tech news today?">
+  <button id="gRunBtn" onclick="runGrounding()">Run</button>
+  <button id="gStopBtn" class="stop-btn" onclick="stopGrounding()" style="display:none">Stop</button>
+</div>
+
+<div class="status-bar" id="gStatus">
+  <span class="spinner"></span>
+  <span id="gStatusText">Starting...</span>
+</div>
+
+<div class="trace-container" id="gResults" style="display:none">
+  <div class="trace-timeline" id="gTimeline"></div>
+</div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- COMPARISON TAB                                                     -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-comparison">
+
+<div class="tab-intro">
+  <strong>You.com vs. Native Search</strong> — Same query, two paths: You.com Search API vs. the model's built-in web search. Compare tokens, cost, and answer quality side by side.
+</div>
+
+<div class="input-bar">
+  <div style="display:flex;align-items:center;gap:4px">
+    <select id="cProvider"></select>
+    <button class="info-btn" onclick="showCompareInfo('ydc')" title="How this model is wired up">ℹ</button>
+  </div>
+  <input type="text" id="cQuery" list="sampleQueries" placeholder="Ask a question or pick from 50 samples…"
+         value="Who won the 2026 men's hockey Olympic gold?">
+  <label><input type="checkbox" id="cSkipJudge"> Skip judge</label>
+  <button id="cRunBtn" onclick="runComparison()">Compare</button>
+  <button id="cStopBtn" class="stop-btn" onclick="stopComparison()" style="display:none">Stop</button>
+</div>
+
+<div class="status-bar" id="cStatus">
+  <span class="spinner"></span>
+  <span id="cStatusText">Starting comparison...</span>
+</div>
+
+<div id="cResults" style="display:none">
+
+  <div class="savings-bar" id="savingsBar"></div>
+
+  <div class="answers">
+    <div class="answer-pane" id="ydcPane">
+      <div class="pane-header">
+        <h3>LLM + You.com Search <button class="info-btn" onclick="showCompareInfo('ydc')" title="How this works">ℹ</button></h3>
+        <span class="badge badge-ydc">3RD PARTY SEARCH</span>
+      </div>
+      <div class="pane-waiting" id="ydcWaiting"><span class="mini-spinner"></span> Waiting for results...</div>
+      <div class="progress-wrap" id="ydcProgressWrap">
+        <button class="progress-toggle" onclick="this.parentElement.classList.toggle('collapsed')"><span class="arrow">&#9660;</span> Tool calls</button>
+        <div class="progress-log" id="ydcProgress"></div>
+      </div>
+      <div class="answer-content" id="ydcAnswer" style="display:none"></div>
+      <div class="sources" id="ydcSources" style="display:none"></div>
+    </div>
+    <div class="answer-pane" id="nativePane">
+      <div class="pane-header">
+        <h3>LLM + Native LLM Web Search <button class="info-btn" onclick="showCompareInfo('native')" title="How this works">ℹ</button></h3>
+        <span class="badge badge-native">NATIVE SEARCH</span>
+      </div>
+      <div class="pane-waiting" id="nativeWaiting"><span class="mini-spinner"></span> Waiting for results...</div>
+      <div class="progress-wrap" id="nativeProgressWrap">
+        <button class="progress-toggle" onclick="this.parentElement.classList.toggle('collapsed')"><span class="arrow">&#9660;</span> Tool calls</button>
+        <div class="progress-log" id="nativeProgress"></div>
+      </div>
+      <div class="answer-content" id="nativeAnswer" style="display:none"></div>
+      <div class="sources" id="nativeSources" style="display:none"></div>
+    </div>
+  </div>
+
+  <div class="metrics-section" id="metricsSection">
+    <h2>Cost & Token Comparison</h2>
+    <div class="tables-row">
+      <div class="metric-table-wrap">
+        <h3>Token Usage</h3>
+        <table class="metric-table">
+          <thead><tr><th></th><th class="col-ydc">LLM + You.com</th><th class="col-native">LLM + Native</th><th class="col-ratio">Ratio</th></tr></thead>
+          <tbody id="tokenTableBody"></tbody>
+        </table>
+      </div>
+      <div class="metric-table-wrap">
+        <h3>Performance & Cost</h3>
+        <table class="metric-table">
+          <thead><tr><th></th><th class="col-ydc">LLM + You.com</th><th class="col-native">LLM + Native</th><th class="col-ratio">Ratio</th></tr></thead>
+          <tbody id="perfTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="cost-footnote" id="costFootnote"></div>
+  </div>
+
+  <div class="judge" id="judgeSection">
+    <h2>Quality Evaluation <span style="font-size:12px;color:#8a8078;font-weight:400">(blind cross-model judge)</span></h2>
+    <div class="verdict-bar" id="verdictBar"></div>
+    <div class="judge-content">
+      <div class="metric-table-wrap">
+        <h3>Scores</h3>
+        <table class="metric-table" id="judgeTable">
+          <thead><tr><th></th><th class="col-ydc">LLM + You.com</th><th class="col-native">LLM + Native</th><th class="col-ratio">Ratio</th></tr></thead>
+          <tbody id="judgeTableBody"></tbody>
+        </table>
+      </div>
+      <div class="judge-reasoning" id="judgeReasoning">
+        <h3>Judge Reasoning</h3>
+      </div>
+    </div>
+    <div class="judge-meta" id="judgeMeta"></div>
+  </div>
+
+  <div class="glossary" id="glossarySection" style="display:none">
+    <h2>Glossary</h2>
+    <dl>
+      <dt>Total cost</dt>
+      <dd>LLM inference cost plus web search cost for the full query. Inference is calculated from input/output token counts and the model's per-token pricing. Search cost is per-call: You.com charges per API call, native search charges per search invocation.</dd>
+
+      <dt>LLM inference</dt>
+      <dd>The portion of cost from tokens processed by the LLM (input tokens read + output tokens generated), excluding search fees.</dd>
+
+      <dt>Search</dt>
+      <dd>The portion of cost from web search calls. You.com: $5 per 1,000 queries. Native (Anthropic built-in): $10 per 1,000 searches.</dd>
+
+      <dt>Latency (end-to-end)</dt>
+      <dd>Wall-clock time from when the query was sent to when the final answer was received, including all search round-trips and LLM generation time.</dd>
+
+      <dt>Web Search API calls</dt>
+      <dd>The number of individual web searches executed. For You.com, each search is a separate REST call to the You.com API. For native, each search happens inside the LLM provider's single API call.</dd>
+
+      <dt>LLM round-trips</dt>
+      <dd>The number of API calls made to the LLM. For You.com, the LLM is called multiple times in a loop: it requests a search, we execute it, feed results back, and the LLM decides whether to search again or answer. Each iteration is one round-trip. For native, this is always 1 because all searching happens inside a single API call on the provider's servers.</dd>
+
+      <dt>Sources returned</dt>
+      <dd>The number of unique source URLs included in the response. More sources can mean broader coverage but also more context tokens for the LLM to process.</dd>
+
+      <dt>Total tokens</dt>
+      <dd>The sum of all input and output tokens across all LLM round-trips for this query.</dd>
+
+      <dt>Input tokens</dt>
+      <dd>Tokens sent to the LLM, including the system prompt, user query, and any search results fed back into the conversation. For native search, the search result content is billed as input tokens.</dd>
+
+      <dt>Search context tokens</dt>
+      <dd>The estimated number of input tokens attributable to search results (as opposed to the base prompt). Higher values mean the LLM is processing more web content, which increases inference cost.</dd>
+
+      <dt>Output tokens</dt>
+      <dd>Tokens generated by the LLM in its response, including any intermediate reasoning before the final answer.</dd>
+
+      <dt>Completeness</dt>
+      <dd>Judge score (1-5). Does the answer fully address all parts of the question? A score of 5 means every aspect of the query was covered.</dd>
+
+      <dt>Relevance</dt>
+      <dd>Judge score (1-5). Is the information on-topic and useful for the question asked? Penalizes off-topic filler or tangential information.</dd>
+
+      <dt>Specificity</dt>
+      <dd>Judge score (1-5). Does the answer provide concrete details (dates, names, numbers, context) rather than vague or generic claims?</dd>
+
+      <dt>Citation Quality</dt>
+      <dd>Judge score (1-5). Are sources cited, numbered, and traceable? Can a reader verify the claims by following the references?</dd>
+
+      <dt>Judge model</dt>
+      <dd>A separate LLM (different from the one being tested) that blindly evaluates both answers without knowing which path produced which. Answers are randomly assigned as "A" and "B" to prevent positional bias.</dd>
+
+      <dt>Tool calls</dt>
+      <dd>The expandable log showing real-time activity during each path's execution. For You.com, it shows each search query with parameters (count, freshness, livecrawl). For native, it shows the streaming events from the provider's built-in search (web_search, code_execution, text generation).</dd>
+    </dl>
+  </div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- SAC COMPARISON TAB                                                 -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-sac">
+
+<div class="tab-intro">
+  <strong>You.com Research API vs. Perplexity Agent API</strong> — two deep-research APIs, each a single call that returns a synthesized answer:
+  <br>· <strong>Left</strong>: <a href="https://you.com/docs/api-reference/research" target="_blank" style="color:#3a8c5a">You.com Research API</a> → one POST, You.com runs multi-step web research internally and returns a synthesized markdown answer with citations.
+  <br>· <strong>Right</strong>: <a href="https://docs.perplexity.ai/docs/agent-api/quickstart" target="_blank" style="color:#c47a4a">Perplexity Agent API</a> (BYOLLM) → Claude (claude-sonnet-4-6) runs inside Perplexity's infrastructure with <code>web_search</code> + <code>fetch_url</code> tools, orchestrates retrieval, and synthesizes.
+  <br><small style="color:#a09888">Note: Both APIs may take 1-3 minutes. You.com Research uses "deep" effort. Perplexity bundles Claude inference + infrastructure; actual cost returned in usage.cost. You.com does not expose per-token billing — cost is estimated per-call.</small>
+</div>
+
+<div class="input-bar">
+  <input type="text" id="sacQuery" placeholder="Ask a question that needs current information..."
+         value="Who won the 2026 men's hockey Olympic gold?">
+  <label><input type="checkbox" id="sacSkipJudge"> Skip judge</label>
+  <button id="sacRunBtn" onclick="runSacComparison()">Compare</button>
+</div>
+
+<div class="status-bar" id="sacStatus">
+  <span class="spinner"></span>
+  <span id="sacStatusText">Starting comparison...</span>
+</div>
+
+<div id="sacResults" style="display:none">
+
+  <div class="savings-bar" id="sacSavingsBar"></div>
+
+  <div class="answers">
+    <div class="answer-pane" id="sacYdcPane">
+      <div class="pane-header">
+        <h3>You.com Research API <button class="info-btn" onclick="showCodeInfo('ydc-research')" title="How this works">ℹ</button></h3>
+        <span class="badge badge-ydc">YOU.COM</span>
+      </div>
+      <div class="pane-waiting" id="sacYdcWaiting"><span class="mini-spinner"></span> Waiting for results...</div>
+      <div class="progress-wrap" id="sacYdcProgressWrap">
+        <button class="progress-toggle" onclick="this.parentElement.classList.toggle('collapsed')"><span class="arrow">&#9660;</span> Progress</button>
+        <div class="progress-log" id="sacYdcProgress"></div>
+      </div>
+      <div class="answer-content" id="sacYdcAnswer" style="display:none"></div>
+      <div class="sources" id="sacYdcSources" style="display:none"></div>
+    </div>
+    <div class="answer-pane" id="sacPlxPane">
+      <div class="pane-header">
+        <h3>Perplexity SaC + Claude <button class="info-btn" onclick="showCodeInfo('perplexity-sac')" title="How this works">ℹ</button></h3>
+        <span class="badge badge-plx">SaC</span>
+      </div>
+      <div class="pane-waiting" id="sacPlxWaiting"><span class="mini-spinner"></span> Waiting for results...</div>
+      <div class="progress-wrap" id="sacPlxProgressWrap">
+        <button class="progress-toggle" onclick="this.parentElement.classList.toggle('collapsed')"><span class="arrow">&#9660;</span> Progress</button>
+        <div class="progress-log" id="sacPlxProgress"></div>
+      </div>
+      <div class="answer-content" id="sacPlxAnswer" style="display:none"></div>
+      <div class="sources" id="sacPlxSources" style="display:none"></div>
+    </div>
+  </div>
+
+  <div class="metrics-section" id="sacMetricsSection">
+    <h2>Cost & Token Comparison</h2>
+    <div class="tables-row">
+      <div class="metric-table-wrap">
+        <h3>Token Usage</h3>
+        <table class="metric-table">
+          <thead><tr><th></th><th class="col-ydc">You.com Research</th><th class="col-plx">Perplexity SaC</th><th class="col-ratio">Ratio</th></tr></thead>
+          <tbody id="sacTokenTableBody"></tbody>
+        </table>
+      </div>
+      <div class="metric-table-wrap">
+        <h3>Performance & Cost</h3>
+        <table class="metric-table">
+          <thead><tr><th></th><th class="col-ydc">You.com Research</th><th class="col-plx">Perplexity SaC</th><th class="col-ratio">Ratio</th></tr></thead>
+          <tbody id="sacPerfTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="cost-footnote" id="sacCostFootnote"></div>
+  </div>
+
+  <div class="judge" id="sacJudgeSection">
+    <h2>Quality Evaluation <span style="font-size:12px;color:#8a8078;font-weight:400">(blind cross-model judge — GPT-5.4)</span></h2>
+    <div class="verdict-bar" id="sacVerdictBar"></div>
+    <div class="judge-content">
+      <div class="metric-table-wrap">
+        <h3>Scores</h3>
+        <table class="metric-table" id="sacJudgeTable">
+          <thead><tr><th></th><th class="col-ydc">You.com Research</th><th class="col-plx">Perplexity SaC</th><th class="col-ratio">Ratio</th></tr></thead>
+          <tbody id="sacJudgeTableBody"></tbody>
+        </table>
+      </div>
+      <div class="judge-reasoning" id="sacJudgeReasoning">
+        <h3>Judge Reasoning</h3>
+      </div>
+    </div>
+    <div class="judge-meta" id="sacJudgeMeta"></div>
+  </div>
+
+  <div class="glossary" id="sacGlossarySection" style="display:none">
+    <h2>Notes on this comparison</h2>
+    <dl>
+      <dt>Both sides are deep-research APIs — one call, full synthesis</dt>
+      <dd>Unlike the basic You.com Search API (which returns snippets for an LLM to read), both APIs here perform multi-step research and return a synthesized markdown answer with citations. You.com Research runs its own internal orchestration; Perplexity's Agent API runs Claude (your specified model) with web_search and fetch_url tools inside Perplexity's infrastructure.</dd>
+
+      <dt>BYOLLM — Perplexity's key differentiator</dt>
+      <dd>Perplexity's Agent API lets you specify any frontier model as the orchestrating LLM — here <code>anthropic/claude-sonnet-4-6</code>. Claude drives the tool calls (<code>web_search</code>, <code>fetch_url</code>), decides when to search and what to fetch, and synthesizes the final answer. You own the model choice; Perplexity provides the search infrastructure.</dd>
+
+      <dt>You.com Research vs. Perplexity Agent API — what's opaque vs. transparent</dt>
+      <dd>You.com Research is fully opaque — one POST, no visibility into how many searches ran or what was fetched. Perplexity Agent API returns structured output items (<code>search_results</code>, <code>fetch_url_results</code>, <code>message</code>) so you can see exactly what Claude searched and fetched, plus a full token + cost breakdown in <code>usage.cost</code>.</dd>
+
+      <dt>Pricing — both are estimated per-call</dt>
+      <dd>Neither API exposes per-token billing in this mode. You.com Research API bundles search + synthesis into a single call (estimate shown; verify at you.com/platform/pricing). Perplexity Agent API bundles Claude inference + SaC infrastructure — see <code>usage.cost</code> in the API response for actual cost when available.</dd>
+
+      <dt>Token counts</dt>
+      <dd>You.com Research API does not return token usage — those fields show N/A. Perplexity SaC returns token counts from Claude's inference running inside their infrastructure.</dd>
+
+      <dt>Judge model</dt>
+      <dd>GPT-5.4 acts as a blind evaluator. Answers are randomly assigned to "A" and "B" positions to prevent positional bias. The judge evaluates structure and quality — it cannot verify factual accuracy.</dd>
+    </dl>
+  </div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- MULTI-MODEL YDC TAB                                                -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-multimodel">
+
+<div class="tab-intro">
+  <strong>Multi-Model You.com</strong> — run the same query through up to 3 models in parallel, all using the You.com Search API. Compare answers, token usage, cost, and latency side by side.
+</div>
+
+<div class="input-bar">
+  <div class="multi-model-selects">
+    <span class="select-label">Models</span>
+    <select id="mSelect0"></select>
+    <span class="select-sep">·</span>
+    <select id="mSelect1"></select>
+    <span class="select-sep">·</span>
+    <select id="mSelect2"></select>
+  </div>
+  <input type="text" id="mQuery" list="sampleQueries" placeholder="Ask a question or pick from 50 samples…"
+         value="Who won the 2026 men's hockey Olympic gold?">
+  <button id="mRunBtn" onclick="runMulti()">Run All</button>
+  <button id="mStopBtn" class="stop-btn" onclick="stopMulti()" style="display:none">Stop</button>
+</div>
+
+<div class="status-bar" id="mStatus">
+  <span class="spinner"></span>
+  <span id="mStatusText">Running...</span>
+</div>
+
+<div id="mResults" style="display:none">
+
+  <div class="multi-answers" id="mPanes">
+    <!-- panes injected by JS -->
+  </div>
+
+  <div class="metrics-section multi-metrics" id="mMetricsSection">
+    <h2>Cost &amp; Token Comparison</h2>
+    <div class="tables-row">
+      <div class="metric-table-wrap">
+        <table class="metric-table" id="mMetricsTable">
+          <thead id="mMetricsHead"></thead>
+          <tbody id="mMetricsBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="cost-footnote" id="mCostFootnote"></div>
+  </div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- JAVASCRIPT                                                         -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<script>
+// ─── Pricing data (loaded from /api/pricing — single source of truth) ────
+let pricingData = null;
+
+async function loadPricing() {
+  try {
+    const res = await fetch('/api/pricing');
+    pricingData = await res.json();
+    populateComparisonDropdown();
+    populatePlaygroundDropdown();
+    populateMultiSelects();
+    populateSupportedModels();
+    populateCostTable();
+  } catch (e) {
+    console.error('Failed to load pricing:', e);
+  }
+}
+
+async function loadSampleQueries() {
+  try {
+    const res = await fetch('/api/questions');
+    const data = await res.json();
+    const dl = document.getElementById('sampleQueries');
+    if (!dl) return;
+    data.tiers.forEach(tier => {
+      tier.questions.forEach(q => {
+        const opt = document.createElement('option');
+        opt.value = q.query;
+        opt.label = `[${tier.name}] ${q.domain}`;
+        dl.appendChild(opt);
+      });
+    });
+  } catch (e) {
+    console.error('Failed to load sample queries:', e);
+  }
+}
+
+function populatePlaygroundDropdown() {
+  if (!pricingData) return;
+  const sel = document.getElementById('gModel');
+  if (!sel) return;
+  sel.innerHTML = '';
+  Object.entries(pricingData.models)
+    .filter(([, m]) => m.in_playground)
+    .forEach(([key, m]) => {
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = m.display_name || m.model;
+      sel.appendChild(opt);
+    });
+}
+
+function populateComparisonDropdown() {
+  if (!pricingData) return;
+  const sel = document.getElementById('cProvider');
+  if (!sel) return;
+  sel.innerHTML = '';
+  Object.entries(pricingData.models)
+    .filter(([, m]) => m.in_comparison)
+    .forEach(([key, m]) => {
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = m.display_name || m.model;
+      sel.appendChild(opt);
+    });
+}
+
+function populateSupportedModels() {
+  if (!pricingData) return;
+  const tbody = document.getElementById('supportedModelsBody');
+  if (!tbody) return;
+  const rows = [];
+  for (const [key, m] of Object.entries(pricingData.models)) {
+    const tabs = [];
+    if (m.in_playground) tabs.push('Playground');
+    if (m.in_comparison) tabs.push('Comparison');
+    const links = [];
+    if (m.model_url) links.push(`<a href="${m.model_url}" target="_blank" style="color:#6b4f9e">Model ↗</a>`);
+    if (m.release_url) links.push(`<a href="${m.release_url}" target="_blank" style="color:#6b4f9e">Release ↗</a>`);
+    if (m.pricing_source_url) links.push(`<a href="${m.pricing_source_url}" target="_blank" style="color:#6b4f9e">Pricing ↗</a>`);
+    const label = `${m.display_name}<br><code style="font-size:11px;color:#8a8078">${m.model}</code>`;
+    rows.push(`<tr><td><code>${key}</code></td><td>${label}</td><td>${m.vendor}</td><td>${tabs.join(', ')}</td><td>${links.join(' · ')}</td></tr>`);
+  }
+  tbody.innerHTML = rows.join('');
+}
+
+function populateCostTable() {
+  if (!pricingData) return;
+  const tbody = document.getElementById('costReferenceBody');
+  if (!tbody) return;
+  const rows = [];
+
+  // Search services
+  rows.push(`<tr><td colspan="3" style="padding:4px 10px;background:#f5f0e8;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#8a8078">Search Services</td></tr>`);
+  for (const svc of (pricingData.search_services || [])) {
+    const srcLink = svc.source_url
+      ? ` · <a href="${svc.source_url}" target="_blank" style="color:#6b4f9e">source ↗</a>`
+      : '';
+    rows.push(`<tr><td>${svc.name}</td><td>${svc.price}</td><td>${svc.notes}${srcLink}</td></tr>`);
+  }
+
+  // LLM models
+  rows.push(`<tr><td colspan="3" style="padding:4px 10px;background:#f5f0e8;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#8a8078">LLM Models</td></tr>`);
+  for (const [, m] of Object.entries(pricingData.models)) {
+    const links = [];
+    if (m.pricing_source_url) links.push(`<a href="${m.pricing_source_url}" target="_blank" style="color:#6b4f9e">pricing ↗</a>`);
+    if (m.model_url) links.push(`<a href="${m.model_url}" target="_blank" style="color:#6b4f9e">model ↗</a>`);
+    const linksStr = links.length ? ` · ${links.join(' · ')}` : '';
+    const notes = m.cost_notes ? `${m.cost_notes}${linksStr}` : linksStr.replace(/^ · /, '');
+    const label = `${m.display_name}<br><code style="font-size:11px;color:#8a8078">${m.model}</code>`;
+    rows.push(`<tr><td>${label}</td><td>$${m.input_cost_per_m} / $${m.output_cost_per_m} per 1M tokens</td><td>${notes}</td></tr>`);
+  }
+
+  tbody.innerHTML = rows.join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// MULTI-MODEL YDC TAB
+// ═══════════════════════════════════════════════════════════════════════
+
+const SLOT_COLORS = ['#2d6b2d', '#5b3d8f', '#0e7a6a'];
+const DEFAULT_PROVIDERS = ['claude', 'gpt5.4', 'kimi'];
+
+let _multiController = null;
+let _multiResults = [null, null, null];  // stats per slot when done
+
+function populateMultiSelects() {
+  if (!pricingData) return;
+  const models = Object.entries(pricingData.models).filter(([, m]) => m.in_comparison);
+  [0, 1, 2].forEach(slot => {
+    const sel = document.getElementById(`mSelect${slot}`);
+    if (!sel) return;
+    sel.innerHTML = '';
+    models.forEach(([key, m]) => {
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = m.display_name || m.model;
+      if (key === DEFAULT_PROVIDERS[slot]) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  });
+}
+
+function _buildMultiPanes(providers) {
+  const container = document.getElementById('mPanes');
+  container.innerHTML = '';
+  providers.forEach((provider, slot) => {
+    const name = pricingData?.models?.[provider]?.display_name || provider;
+    const color = SLOT_COLORS[slot];
+    const pane = document.createElement('div');
+    pane.className = 'answer-pane';
+    pane.id = `mPane${slot}`;
+    pane.innerHTML = `
+      <div class="pane-header">
+        <h3 id="mPaneTitle${slot}" style="color:${color}">${name}</h3>
+      </div>
+      <div class="pane-waiting" id="mWaiting${slot}"><span class="mini-spinner"></span> Waiting for results...</div>
+      <div class="progress-wrap" id="mProgressWrap${slot}">
+        <button class="progress-toggle" onclick="this.parentElement.classList.toggle('collapsed')">
+          <span class="arrow">&#9660;</span> Tool calls
+        </button>
+        <div class="progress-log" id="mProgress${slot}"></div>
+      </div>
+      <div class="answer-content" id="mAnswer${slot}" style="display:none"></div>
+      <div class="sources" id="mSources${slot}" style="display:none"></div>
+    `;
+    container.appendChild(pane);
+  });
+}
+
+function stopMulti() {
+  if (_multiController) { _multiController.abort(); _multiController = null; }
+  document.getElementById('mRunBtn').disabled = false;
+  document.getElementById('mRunBtn').textContent = 'Run All';
+  document.getElementById('mStopBtn').style.display = 'none';
+  document.getElementById('mStatus').classList.remove('visible');
+}
+
+async function runMulti() {
+  const query = document.getElementById('mQuery').value.trim();
+  if (!query) return;
+  const providers = [0, 1, 2].map(i => document.getElementById(`mSelect${i}`).value);
+  const btn = document.getElementById('mRunBtn');
+
+  _multiController = new AbortController();
+  _multiResults = [null, null, null];
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+  document.getElementById('mStopBtn').style.display = '';
+  document.getElementById('mStatus').classList.add('visible');
+  document.getElementById('mStatusText').textContent = 'Starting parallel runs...';
+  document.getElementById('mResults').style.display = 'block';
+  document.getElementById('mMetricsSection').classList.remove('visible');
+
+  _buildMultiPanes(providers);
+
+  try {
+    await streamSSE('/api/multi-compare', { query, providers },
+      handleMultiEvent,
+      msg => { document.getElementById('mStatusText').textContent = `Error: ${msg}`; },
+      _multiController.signal
+    );
+  } catch (err) {
+    if (err.name !== 'AbortError') document.getElementById('mStatusText').textContent = `Error: ${err.message || err}`;
+  }
+
+  _multiController = null;
+  document.getElementById('mStopBtn').style.display = 'none';
+  document.getElementById('mStatus').classList.remove('visible');
+  btn.disabled = false;
+  btn.textContent = 'Run All';
+}
+
+function handleMultiEvent(event, data) {
+  switch (event) {
+    case 'status':
+      document.getElementById('mStatusText').textContent = data.message;
+      break;
+
+    case 'model_progress': {
+      const slot = data.slot;
+      const wrap = document.getElementById(`mProgressWrap${slot}`);
+      const log = document.getElementById(`mProgress${slot}`);
+      if (!wrap || !log) break;
+      wrap.classList.add('visible');
+      const line = document.createElement('div');
+      line.className = 'log-line';
+      line.textContent = data.message;
+      log.appendChild(line);
+      log.scrollTop = log.scrollHeight;
+      break;
+    }
+
+    case 'model_result': {
+      const slot = data.slot;
+      _multiResults[slot] = data;
+
+      const pane = document.getElementById(`mPane${slot}`);
+      if (pane) pane.classList.add('loaded');
+
+      const waiting = document.getElementById(`mWaiting${slot}`);
+      if (waiting) waiting.style.display = 'none';
+
+      const answerEl = document.getElementById(`mAnswer${slot}`);
+      if (answerEl) {
+        answerEl.innerHTML = renderMarkdown(data.answer || '');
+        answerEl.style.display = 'block';
+      }
+
+      const srcEl = document.getElementById(`mSources${slot}`);
+      if (srcEl && data.sources?.length) {
+        srcEl.innerHTML = '<strong>Sources:</strong> ' +
+          data.sources.map((u, i) => `<a href="${u}" target="_blank">[${i+1}]</a>`).join(' ');
+        srcEl.style.display = 'block';
+      }
+
+      // Paint metrics once all expected slots have returned
+      const activeCount = document.getElementById('mPanes').children.length;
+      const done = _multiResults.slice(0, activeCount).every(r => r !== null);
+      if (done) paintMultiMetrics(activeCount);
+      break;
+    }
+
+    case 'model_error': {
+      const slot = data.slot;
+      const waiting = document.getElementById(`mWaiting${slot}`);
+      if (waiting) waiting.innerHTML = `<span style="color:#b85c4a;font-size:12px">⚠ ${data.message}</span>`;
+      break;
+    }
+
+    case 'done':
+      document.getElementById('mStatusText').textContent = 'Done.';
+      break;
+
+    case 'error':
+      document.getElementById('mStatusText').textContent = `Error: ${data.message}`;
+      document.getElementById('mStatus').classList.remove('visible');
+      document.getElementById('mRunBtn').disabled = false;
+      document.getElementById('mRunBtn').textContent = 'Run All';
+      document.getElementById('mStopBtn').style.display = 'none';
+      break;
+  }
+}
+
+function paintMultiMetrics(count) {
+  const results = _multiResults.slice(0, count);
+
+  // Build header row
+  const headerCells = results.map((r, i) =>
+    `<th class="col-m${i}">${r.display_name}</th>`
+  ).join('');
+  document.getElementById('mMetricsHead').innerHTML =
+    `<tr><th></th>${headerCells}</tr>`;
+
+  function makeMultiRow(label, vals, opts = {}) {
+    const { lowerWins = false, raws, indent = 0 } = opts;
+    let winnerIdx = -1;
+    if (lowerWins && raws && raws.every(v => v !== undefined)) {
+      const min = Math.min(...raws.filter(v => v !== undefined));
+      winnerIdx = raws.indexOf(min);
+    }
+    const labelStyle = indent === 0
+      ? `padding-left:${14 + indent*16}px;font-weight:600`
+      : `padding-left:${14 + indent*16}px;font-weight:400;font-size:12px;color:#8a8078`;
+    const cells = vals.map((v, i) =>
+      `<td class="val-m${i}${winnerIdx === i ? ' winner' : ''}">${v}</td>`
+    ).join('');
+    return `<tr><td class="row-label" style="${labelStyle}">${label}</td>${cells}</tr>`;
+  }
+
+  const rows = [
+    makeMultiRow('Total tokens',
+      results.map(r => r.total_tokens.toLocaleString()),
+      { lowerWins: true, raws: results.map(r => r.total_tokens), indent: 0 }),
+    makeMultiRow('Input tokens',
+      results.map(r => r.input_tokens.toLocaleString()),
+      { lowerWins: true, raws: results.map(r => r.input_tokens), indent: 1 }),
+    makeMultiRow('Search context (est.)',
+      results.map(r => '~' + r.search_context_tokens.toLocaleString()),
+      { lowerWins: true, raws: results.map(r => r.search_context_tokens), indent: 2 }),
+    makeMultiRow('Output tokens',
+      results.map(r => r.output_tokens.toLocaleString()),
+      { raws: results.map(r => r.output_tokens), indent: 1 }),
+    makeMultiRow('Total cost',
+      results.map(r => `$${r.cost.toFixed(5)}`),
+      { lowerWins: true, raws: results.map(r => r.cost), indent: 0 }),
+    makeMultiRow('LLM inference',
+      results.map(r => `$${r.cost_llm.toFixed(5)}`),
+      { lowerWins: true, raws: results.map(r => r.cost_llm), indent: 1 }),
+    makeMultiRow('Search',
+      results.map(r => `$${r.cost_search.toFixed(5)}`),
+      { lowerWins: true, raws: results.map(r => r.cost_search), indent: 1 }),
+    makeMultiRow('Latency (end-to-end)',
+      results.map(r => r.latency_ms.toLocaleString() + 'ms'),
+      { lowerWins: true, raws: results.map(r => r.latency_ms), indent: 0 }),
+    makeMultiRow('Search API calls',
+      results.map(r => r.search_calls),
+      { raws: results.map(r => r.search_calls), indent: 0 }),
+    makeMultiRow('LLM round-trips',
+      results.map(r => r.api_calls),
+      { raws: results.map(r => r.api_calls), indent: 0 }),
+    makeMultiRow('Sources returned',
+      results.map(r => r.sources.length),
+      { raws: results.map(r => r.sources.length), indent: 0 }),
+  ];
+
+  document.getElementById('mMetricsBody').innerHTML = rows.join('');
+
+  // Cost footnote
+  const lines = results.map((r, i) => {
+    const p = r.pricing;
+    if (!p) return '';
+    return `<strong style="color:${SLOT_COLORS[i]}">${r.display_name}</strong>: $${p.input_cost_per_m}/M in · $${p.output_cost_per_m}/M out · You.com $${(p.ydc_search_per_1k / 1000 * 1000).toFixed(2)}/1k queries`;
+  }).filter(Boolean);
+  document.getElementById('mCostFootnote').innerHTML = lines.join(' &nbsp;|&nbsp; ');
+
+  document.getElementById('mMetricsSection').classList.add('visible');
+}
+
+document.addEventListener('DOMContentLoaded', () => { loadPricing(); loadSampleQueries(); });
+
+// ─── Tab switching ──────────────────────────────────────────────────
+function openDiagram() {
+  const src = document.querySelector('.diagram-wrap svg');
+  if (!src) return;
+  document.getElementById('diagramModalContent').innerHTML = src.outerHTML;
+  document.getElementById('diagramOverlay').classList.add('visible');
+  document.addEventListener('keydown', _diagramEsc);
+}
+function closeDiagram() {
+  document.getElementById('diagramOverlay').classList.remove('visible');
+  document.removeEventListener('keydown', _diagramEsc);
+}
+function _diagramEsc(e) { if (e.key === 'Escape') closeDiagram(); }
+
+function switchTab(tabId) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + tabId).classList.add('active');
+  // Map tab IDs to button labels
+  const labelMap = { about: 'About', playground: 'LLM + You.com Playground', comparison: 'You.com vs. Native Search', sac: 'You.com vs. Perplexity Agent API' };
+  const label = labelMap[tabId];
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    if (b.textContent === label) b.classList.add('active');
+  });
+}
+
+// ─── SSE stream helper ──────────────────────────────────────────────
+let _groundingController = null;
+let _compareController = null;
+
+async function streamSSE(url, body, onEvent, onError, signal) {
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  if (!resp.ok) {
+    try {
+      const data = await resp.json();
+      onError(data.error || `Server returned ${resp.status}`);
+    } catch (_) {
+      onError(`Server returned ${resp.status}`);
+    }
+    return;
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (signal?.aborted) { reader.cancel(); break; }
+    buffer += decoder.decode(value, { stream: true });
+
+    let boundary;
+    while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+      const chunk = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      if (!chunk.trim()) continue;
+
+      let eventName = '', eventData = '';
+      for (const line of chunk.split('\n')) {
+        if (line.startsWith('event: ')) eventName = line.slice(7).trim();
+        else if (line.startsWith('data: ')) eventData += line.slice(6);
+      }
+      if (eventName && eventData) {
+        try { onEvent(eventName, JSON.parse(eventData)); }
+        catch (e) { console.error('SSE parse error:', eventName, e); }
+      }
+    }
+  }
+
+  // Flush remaining
+  if (buffer.trim()) {
+    let eventName = '', eventData = '';
+    for (const line of buffer.split('\n')) {
+      if (line.startsWith('event: ')) eventName = line.slice(7).trim();
+      else if (line.startsWith('data: ')) eventData += line.slice(6);
+    }
+    if (eventName && eventData) {
+      try { onEvent(eventName, JSON.parse(eventData)); }
+      catch (e) { console.error('SSE final parse error:', e); }
+    }
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// GROUNDING TAB
+// ═══════════════════════════════════════════════════════════════════════
+
+function stopGrounding() {
+  if (_groundingController) { _groundingController.abort(); _groundingController = null; }
+  document.getElementById('gRunBtn').disabled = false;
+  document.getElementById('gRunBtn').textContent = 'Run';
+  document.getElementById('gStopBtn').style.display = 'none';
+  document.getElementById('gStatus').classList.remove('visible');
+  document.getElementById('gStatusText').textContent = 'Stopped.';
+}
+
+async function runGrounding() {
+  const model = document.getElementById('gModel').value;
+  const query = document.getElementById('gQuery').value.trim();
+  const btn = document.getElementById('gRunBtn');
+  if (!query) return;
+
+  _groundingController = new AbortController();
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+  document.getElementById('gStopBtn').style.display = '';
+  document.getElementById('gStatus').classList.add('visible');
+  document.getElementById('gStatusText').textContent = 'Initializing...';
+  document.getElementById('gResults').style.display = 'block';
+  document.getElementById('gTimeline').innerHTML = '';
+
+  try {
+    await streamSSE('/api/grounding', { model, query },
+      handleGroundingEvent,
+      msg => { document.getElementById('gStatusText').textContent = `Error: ${msg}`; },
+      _groundingController.signal
+    );
+  } catch (err) {
+    if (err.name !== 'AbortError') document.getElementById('gStatusText').textContent = `Error: ${err.message || err}`;
+  }
+
+  _groundingController = null;
+  document.getElementById('gStatus').classList.remove('visible');
+  document.getElementById('gStopBtn').style.display = 'none';
+  btn.disabled = false;
+  btn.textContent = 'Run';
+}
+
+let gSearchCount = 0;
+
+function handleGroundingEvent(event, data) {
+  const tl = document.getElementById('gTimeline');
+
+  switch (event) {
+    case 'init':
+      gSearchCount = 0;
+      document.getElementById('gStatusText').textContent =
+        `Running ${data.display_name} + You.com Search...`;
+      tl.innerHTML += traceStep('init', 'Initialized',
+        `Requested: <code>${data.model}</code> (${data.vendor})<br>Query: "${data.question}"`);
+      break;
+
+    case 'tool_call':
+      gSearchCount++;
+      document.getElementById('gStatusText').textContent =
+        `Searching: "${data.query}"...`;
+      const params = data.params && Object.keys(data.params).length
+        ? ' · ' + Object.entries(data.params).map(([k,v]) => `${k}=${v}`).join(', ')
+        : '';
+      tl.innerHTML += traceStep('search', `Search ${gSearchCount}`,
+        `Query: <code>${data.query}</code>${params}`);
+      break;
+
+    case 'search_result': {
+      const uuid = data.search_uuid
+        ? ` · <code>uuid=${data.search_uuid.slice(0, 16)}…</code>` : '';
+      tl.innerHTML += traceStep('result', 'Search Results',
+        `${data.result_count} results in ${data.latency_ms}ms${uuid}`);
+      break;
+    }
+
+    case 'answer':
+      document.getElementById('gStatusText').textContent = 'Done.';
+      let html = `<div class="trace-answer-box">${renderMarkdown(data.text)}</div>`;
+      if (data.sources && data.sources.length) {
+        html += `<div class="trace-sources"><strong>Sources:</strong> ` +
+          data.sources.map((u, i) => `<a href="${u}" target="_blank">[${i+1}]</a>`).join(' ') +
+          `</div>`;
+      }
+      tl.innerHTML += traceStep('answer', 'Answer', html);
+      break;
+
+    case 'done': {
+      const s = data.stats;
+      const confirmedBadge = s.model_confirmed
+        ? `<div style="margin-bottom:8px;font-size:11px;color:#4a7c4a;background:#eef5ee;border:1px solid #c3dbc3;border-radius:4px;padding:4px 10px;display:inline-block">✓ API confirmed: <code style="font-size:11px">${s.model_confirmed}</code></div>`
+        : '';
+      tl.innerHTML += traceStep('done', 'Complete', `
+        ${confirmedBadge}
+        <div class="trace-stats">
+          <div class="stat-card"><div class="stat-value">${s.total_tokens.toLocaleString()}</div><div class="stat-label">Total tokens</div></div>
+          <div class="stat-card"><div class="stat-value">${s.input_tokens.toLocaleString()}</div><div class="stat-label">Input tokens</div></div>
+          <div class="stat-card"><div class="stat-value">${s.output_tokens.toLocaleString()}</div><div class="stat-label">Output tokens</div></div>
+          <div class="stat-card"><div class="stat-value">~${s.search_context_tokens.toLocaleString()}</div><div class="stat-label">Search context<br><span style="font-size:9px;color:#a09888">(included in input tokens)</span></div></div>
+          <div class="stat-card"><div class="stat-value">${s.search_calls}</div><div class="stat-label">Web searches</div></div>
+          <div class="stat-card"><div class="stat-value">${(s.latency_ms / 1000).toFixed(1)}s</div><div class="stat-label">Latency</div></div>
+        </div>
+      `);
+      break;
+    }
+
+    case 'error':
+      tl.innerHTML += traceStep('error', 'Error', data.message);
+      break;
+  }
+
+  // Auto-scroll to bottom
+  const container = document.getElementById('gResults');
+  container.scrollTop = container.scrollHeight;
+}
+
+function traceStep(type, label, detail) {
+  const labelClass = {
+    init: 'label-init', search: 'label-search', result: 'label-result',
+    answer: 'label-answer', done: 'label-done', error: 'label-error'
+  }[type] || '';
+  const stepClass = {
+    init: 'step-init', search: 'step-search', result: 'step-result',
+    answer: 'step-answer', done: 'step-done', error: 'step-error'
+  }[type] || '';
+  return `<div class="trace-step ${stepClass}">
+    <div class="trace-content">
+      <div class="trace-label ${labelClass}">${label}</div>
+      <div class="trace-detail">${detail}</div>
+    </div>
+  </div>`;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function renderMarkdown(text) {
+  let html = escapeHtml(text);
+  // Horizontal rules
+  html = html.replace(/^---$/gm, '<hr>');
+  // Headers (### before ## before #)
+  html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  // Bold
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  // Italic
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  // Inline code
+  html = html.replace(/`(.+?)`/g, '<code>$1</code>');
+  // Links [text](url)
+  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+  // Citation markers like [1], [2] — make them superscript
+  html = html.replace(/\[(\d+)\]/g, '<sup class="cite">[$1]</sup>');
+  // Convert both list syntaxes to <li> first, then wrap — order matters.
+  // Numbered lists: "1. ", "2. ", …  (value= attribute used to distinguish from bullets)
+  html = html.replace(/^(\d+)\. (.+)$/gm, '<li value="$1">$2</li>');
+  // Bullet lists: "- " or "• "
+  html = html.replace(/^[•\-] (.+)$/gm, '<li>$1</li>');
+  // LLMs often put blank lines between list items. Collapse \n\n → \n between any
+  // adjacent </li>…<li> pairs so consecutive items land in one list, not one list
+  // per item (each list adds 8px top + 8px bottom margin = 16px gap per bullet).
+  html = html.replace(/(<\/li>)\n\n(<li)/g, '$1\n$2');
+  // Wrap consecutive numbered items in <ol>, bullets in <ul>.
+  // value= presence distinguishes the two — a plain <li> is always a bullet.
+  html = html.replace(/((?:<li value="[^"]*">.*?<\/li>\n?)+)/g, '<ol>$1</ol>');
+  html = html.replace(/((?:<li>.*?<\/li>\n?)+)/g, '<ul>$1</ul>');
+  // Strip newlines between list items — they'd become spurious <br> tags later
+  html = html.replace(/<\/li>\n/g, '</li>');
+  // Line breaks → paragraphs (double newline) and <br> (single)
+  // But skip lines that are already block elements
+  html = html.split(/\n{2,}/).map(p => {
+    const trimmed = p.trim();
+    if (/^<(h[1-4]|hr|ol|ul|li)/.test(trimmed)) return trimmed;
+    return `<p>${trimmed}</p>`;
+  }).join('');
+  html = html.replace(/\n/g, '<br>');
+  return html;
+}
+
+document.getElementById('gQuery').addEventListener('keydown', e => {
+  if (e.key === 'Enter') runGrounding();
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// COMPARISON TAB (ported from existing index.html)
+// ═══════════════════════════════════════════════════════════════════════
+
+let ydcData = null, nativeData = null, pricing = null;
+
+function stopComparison() {
+  if (_compareController) { _compareController.abort(); _compareController = null; }
+  const btn = document.getElementById('cRunBtn');
+  btn.disabled = false;
+  btn.textContent = 'Compare';
+  document.getElementById('cStopBtn').style.display = 'none';
+  document.getElementById('cStatus').classList.remove('visible');
+}
+
+async function runComparison() {
+  const query = document.getElementById('cQuery').value.trim();
+  const provider = document.getElementById('cProvider').value;
+  const skipJudge = document.getElementById('cSkipJudge').checked;
+  const btn = document.getElementById('cRunBtn');
+  if (!query) return;
+
+  _compareController = new AbortController();
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+  document.getElementById('cStopBtn').style.display = '';
+  ydcData = null; nativeData = null; pricing = null;
+
+  document.getElementById('cStatus').classList.add('visible');
+  document.getElementById('cStatusText').textContent = 'Starting comparison...';
+  document.getElementById('cResults').style.display = 'block';
+
+  // Reset panes
+  document.getElementById('ydcPane').classList.remove('loaded');
+  document.getElementById('nativePane').classList.remove('loaded');
+  document.getElementById('ydcWaiting').style.display = 'flex';
+  document.getElementById('ydcAnswer').style.display = 'none';
+  document.getElementById('ydcSources').style.display = 'none';
+  document.getElementById('nativeWaiting').style.display = 'flex';
+  document.getElementById('nativeAnswer').style.display = 'none';
+  document.getElementById('nativeSources').style.display = 'none';
+  document.getElementById('ydcProgress').innerHTML = '';
+  document.getElementById('ydcProgressWrap').classList.remove('visible', 'collapsed');
+  document.getElementById('nativeProgress').innerHTML = '';
+  document.getElementById('nativeProgressWrap').classList.remove('visible', 'collapsed');
+  document.getElementById('savingsBar').classList.remove('visible');
+  document.getElementById('metricsSection').classList.remove('visible');
+  document.getElementById('judgeSection').classList.remove('visible');
+  document.getElementById('glossarySection').style.display = 'none';
+
+  // Update pane headers with selected model name
+  const modelName = document.getElementById('cProvider').selectedOptions[0].textContent;
+  document.querySelector('#ydcPane .pane-header h3').textContent = modelName + ' + You.com Search';
+  document.querySelector('#nativePane .pane-header h3').textContent = modelName + ' + Native Web Search';
+
+  try {
+    await streamSSE('/api/compare',
+      { query, provider, skip_judge: skipJudge },
+      handleCompareEvent,
+      msg => { document.getElementById('cStatusText').textContent = `Error: ${msg}`; },
+      _compareController.signal
+    );
+  } catch (err) {
+    if (err.name !== 'AbortError') document.getElementById('cStatusText').textContent = `Error: ${err.message || err}`;
+  }
+
+  _compareController = null;
+  document.getElementById('cStopBtn').style.display = 'none';
+  btn.disabled = false;
+  btn.textContent = 'Compare';
+}
+
+function handleCompareEvent(event, data) {
+  switch (event) {
+    case 'status':
+      document.getElementById('cStatusText').textContent = data.message;
+      break;
+    case 'progress': {
+      const prefix = data.path === 'youdotcom' ? 'ydc' : 'native';
+      const wrapEl = document.getElementById(prefix + 'ProgressWrap');
+      const logEl = document.getElementById(prefix + 'Progress');
+      wrapEl.classList.add('visible');
+      const line = document.createElement('div');
+      line.className = 'log-line';
+      line.textContent = data.message;
+      logEl.appendChild(line);
+      logEl.scrollTop = logEl.scrollHeight;
+      break;
+    }
+    case 'youdotcom':
+      ydcData = data;
+      paintAnswerPane('ydc', data);
+      break;
+    case 'native':
+      nativeData = data;
+      paintAnswerPane('native', data);
+      if (ydcData && nativeData) { paintMetrics(); paintSavings(); }
+      break;
+    case 'native_unavailable':
+      document.getElementById('nativeWaiting').style.display = 'none';
+      document.getElementById('nativeAnswer').innerHTML =
+        '<div style="padding:20px;text-align:center;color:#9a8a78;font-size:13px;background:#f9f6f1;border-radius:6px;border:1px dashed #d4c9bc">' +
+        '⚠ Native web search is not supported for this model.<br>' +
+        '<small style="color:#b8a898">This model can only be used with You.com Search.</small></div>';
+      document.getElementById('nativeProgressWrap').style.display = 'none';
+      break;
+    case 'judge':
+      paintJudge(data);
+      break;
+    case 'done':
+      document.getElementById('cStatus').classList.remove('visible');
+      pricing = data.pricing;
+      paintFootnote(data);
+      break;
+    case 'error':
+      document.getElementById('cStatusText').textContent = `Error: ${data.message}`;
+      document.getElementById('cStatus').classList.remove('visible');
+      // Stop both waiting spinners so the UI doesn't hang
+      ['ydcWaiting', 'nativeWaiting'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = `<span style="color:#b85c4a;font-size:12px">⚠ ${data.message}</span>`;
+      });
+      document.getElementById('cRunBtn').disabled = false;
+      break;
+  }
+}
+
+function paintAnswerPane(side, data) {
+  const prefix = side === 'ydc' ? 'ydc' : 'native';
+  const paneId = side === 'ydc' ? 'ydcPane' : 'nativePane';
+  document.getElementById(prefix + 'Waiting').style.display = 'none';
+  // Collapse the progress log (still visible, click to expand)
+  const wrap = document.getElementById(prefix + 'ProgressWrap');
+  wrap.classList.add('collapsed');
+  // Update toggle to show count of events
+  const logLines = document.getElementById(prefix + 'Progress').querySelectorAll('.log-line').length;
+  const toggle = wrap.querySelector('.progress-toggle');
+  if (toggle && logLines > 0) {
+    toggle.innerHTML = '<span class="arrow">&#9660;</span> Tool calls <span class="log-count">(' + logLines + ' events)</span>';
+  }
+  const confirmedBadge = data.model_confirmed
+    ? `<div style="margin-bottom:8px;font-size:11px;color:#4a7c4a;background:#eef5ee;border:1px solid #c3dbc3;border-radius:4px;padding:4px 10px;display:inline-block">✓ API confirmed: <code style="font-size:11px">${data.model_confirmed}</code></div>`
+    : '';
+  document.getElementById(prefix + 'Answer').style.display = 'block';
+  document.getElementById(prefix + 'Answer').innerHTML = confirmedBadge + renderMarkdown(data.answer);
+  const srcEl = document.getElementById(prefix + 'Sources');
+  srcEl.style.display = 'block';
+  srcEl.innerHTML = data.sources.length
+    ? '<strong>Sources:</strong> ' + data.sources.map((u, i) =>
+        `<a href="${u}" target="_blank">[${i+1}]</a>`).join(' ')
+    : '<em>No sources</em>';
+  document.getElementById(paneId).classList.add('loaded');
+}
+
+function paintSavings() {
+  const y = ydcData, n = nativeData;
+  const savings = n.total_tokens - y.total_tokens;
+  const savingsPct = n.total_tokens > 0 ? Math.round((savings / n.total_tokens) * 100) : 0;
+  const costSavings = n.cost - y.cost;
+  const costPct = n.cost > 0 ? Math.round((costSavings / n.cost) * 100) : 0;
+  const bar = document.getElementById('savingsBar');
+
+  if (savings > 0 && costSavings > 0) {
+    bar.className = 'savings-bar visible';
+    bar.textContent = `LLM + You.com Search used ${savingsPct}% fewer tokens (${savings.toLocaleString()} saved) and cost ${costPct}% less ($${costSavings.toFixed(5)} saved per query)`;
+  } else if (savings > 0) {
+    bar.className = 'savings-bar visible';
+    bar.textContent = `LLM + You.com Search used ${savingsPct}% fewer tokens (${savings.toLocaleString()} saved)`;
+  } else if (savings < 0) {
+    bar.className = 'savings-bar visible negative';
+    bar.textContent = `LLM + Native used ${(-savings).toLocaleString()} fewer tokens this run`;
+  } else {
+    bar.className = 'savings-bar visible';
+    bar.textContent = 'Token usage identical';
+  }
+}
+
+function makeRow(label, ydcVal, natVal, opts = {}) {
+  const { lowerWins = false, yRaw, nRaw, indent = 0 } = opts;
+  let ywClass = 'val-ydc', nwClass = 'val-native';
+  if (lowerWins && yRaw !== undefined && nRaw !== undefined) {
+    if (yRaw < nRaw) ywClass += ' winner';
+    else if (nRaw < yRaw) nwClass += ' winner';
+  }
+  const padLeft = indent * 16;
+  const labelStyle = indent === 0
+    ? `padding-left:${14 + padLeft}px; font-weight:600`
+    : `padding-left:${14 + padLeft}px; font-weight:400; font-size:12px; color:#8a8078`;
+  let ratioHtml = '<td class="ratio-cell">—</td>';
+  if (yRaw !== undefined && nRaw !== undefined && nRaw > 0) {
+    const ratio = yRaw / nRaw;
+    if (Math.abs(ratio - 1) < 0.005) {
+      ratioHtml = '<td class="ratio-cell">1.0x</td>';
+    } else if (lowerWins) {
+      const ratioLabel = ratio < 1
+        ? (ratio * 100).toFixed(0) + '% of native'
+        : ratio.toFixed(1) + 'x native';
+      const cls = ratio < 1 ? 'ratio-good' : 'ratio-bad';
+      ratioHtml = `<td class="ratio-cell ${cls}">${ratioLabel}</td>`;
+    } else {
+      ratioHtml = `<td class="ratio-cell">${ratio.toFixed(1)}x</td>`;
+    }
+  } else if (yRaw !== undefined && nRaw !== undefined && nRaw === 0 && yRaw === 0) {
+    ratioHtml = '<td class="ratio-cell">—</td>';
+  }
+  return `<tr>
+    <td class="row-label" style="${labelStyle}">${label}</td>
+    <td class="${ywClass}">${ydcVal}</td>
+    <td class="${nwClass}">${natVal}</td>
+    ${ratioHtml}
+  </tr>`;
+}
+
+function paintMetrics() {
+  const y = ydcData, n = nativeData;
+  document.getElementById('tokenTableBody').innerHTML = [
+    makeRow('Total tokens', y.total_tokens.toLocaleString(), n.total_tokens.toLocaleString(),
+      { lowerWins: true, yRaw: y.total_tokens, nRaw: n.total_tokens, indent: 0 }),
+    makeRow('Input tokens', y.input_tokens.toLocaleString(), n.input_tokens.toLocaleString(),
+      { lowerWins: true, yRaw: y.input_tokens, nRaw: n.input_tokens, indent: 1 }),
+    makeRow('Search context (est.)', '~' + y.search_context_tokens.toLocaleString(), '~' + n.search_context_tokens.toLocaleString(),
+      { lowerWins: true, yRaw: y.search_context_tokens, nRaw: n.search_context_tokens, indent: 2 }),
+    makeRow('Output tokens', y.output_tokens.toLocaleString(), n.output_tokens.toLocaleString(),
+      { yRaw: y.output_tokens, nRaw: n.output_tokens, indent: 1 }),
+  ].join('');
+
+  const costClick = (side, label) =>
+    `class="cost-clickable" onclick="showCostPopup('${side}', this)" title="Click to see cost breakdown"`;
+
+  document.getElementById('perfTableBody').innerHTML = [
+    makeRow('Total cost ⓘ',
+      `<span ${costClick('ydc','Total cost')}>$${y.cost.toFixed(5)}</span>`,
+      `<span ${costClick('native','Total cost')}>$${n.cost.toFixed(5)}</span>`,
+      { lowerWins: true, yRaw: y.cost, nRaw: n.cost, indent: 0 }),
+    makeRow('LLM inference',
+      `<span ${costClick('ydc','LLM inference')}>$${y.cost_llm.toFixed(5)}</span>`,
+      `<span ${costClick('native','LLM inference')}>$${n.cost_llm.toFixed(5)}</span>`,
+      { lowerWins: true, yRaw: y.cost_llm, nRaw: n.cost_llm, indent: 1 }),
+    makeRow('Search',
+      `<span ${costClick('ydc','Search')}>$${y.cost_search.toFixed(5)}</span>`,
+      `<span ${costClick('native','Search')}>$${n.cost_search.toFixed(5)}</span>`,
+      { lowerWins: true, yRaw: y.cost_search, nRaw: n.cost_search, indent: 1 }),
+    makeRow('Latency (end-to-end)', y.latency_ms.toLocaleString() + 'ms', n.latency_ms.toLocaleString() + 'ms',
+      { lowerWins: true, yRaw: y.latency_ms, nRaw: n.latency_ms, indent: 0 }),
+    makeRow('Web Search API calls', y.search_calls, n.search_calls,
+      { yRaw: y.search_calls, nRaw: n.search_calls, indent: 0 }),
+    makeRow('LLM round-trips', y.api_calls, n.api_calls,
+      { yRaw: y.api_calls, nRaw: n.api_calls, indent: 0 }),
+    makeRow('Sources returned', y.sources.length, n.sources.length,
+      { yRaw: y.sources.length, nRaw: n.sources.length, indent: 0 }),
+  ].join('');
+
+  document.getElementById('metricsSection').classList.add('visible');
+  document.getElementById('glossarySection').style.display = 'block';
+}
+
+function paintFootnote(doneData) {
+  const p = doneData.pricing;
+  const model = doneData.model || '';
+  if (!p) return;
+
+  document.querySelectorAll('#tab-comparison .answer-pane .pane-header h3').forEach(h => {
+    if (h.textContent.includes('You.com')) h.textContent = `${model} + You.com Search`;
+    else if (h.textContent.includes('Native')) h.textContent = `${model} + Native LLM Web Search`;
+  });
+
+  const nativeNote = p.native_search_note || '';
+  const nativeConfig = doneData.native_search_config || '';
+  const pricingUrl = p.pricing_source_url || '';
+  const pricingLink = pricingUrl
+    ? ` (<a href="${pricingUrl}" target="_blank" style="color:#a09888;text-decoration:underline">source ↗</a>)`
+    : '';
+  const nativeSearchUrl = p.native_search_source_url || '';
+  const nativeSearchLink = nativeSearchUrl
+    ? ` (<a href="${nativeSearchUrl}" target="_blank" style="color:#a09888;text-decoration:underline">source ↗</a>)`
+    : '';
+  document.getElementById('costFootnote').innerHTML =
+    `Cost assumptions: ${model} @ $${p.input_cost_per_m}/M input, $${p.output_cost_per_m}/M output${pricingLink} · ` +
+    `You.com Search @ $${p.ydc_search_per_1k}/1k queries · ` +
+    `Native Search @ $${p.native_search_per_1k}/1k searches${nativeNote}${nativeSearchLink}` +
+    (nativeConfig ? `<br>Native search tool: ${nativeConfig}` : '');
+}
+
+function paintJudge(data) {
+  const section = document.getElementById('judgeSection');
+  if (data.error) { section.classList.remove('visible'); return; }
+  section.classList.add('visible');
+
+  const ys = data.youdotcom_scores, ns = data.native_scores;
+  const dims = ['completeness', 'relevance', 'specificity', 'citation_quality'];
+  const dimLabels = { completeness: 'Completeness', relevance: 'Relevance', specificity: 'Specificity', citation_quality: 'Citation Quality' };
+
+  const verdict = data.verdict || 'comparable';
+  const verdictReasoning = data.verdict_reasoning || '';
+  const verdictBar = document.getElementById('verdictBar');
+  if (verdict === 'comparable') {
+    verdictBar.className = 'verdict-bar verdict-comparable';
+    verdictBar.innerHTML = '<strong>Verdict: Comparable</strong>' + (verdictReasoning ? ' — ' + verdictReasoning : '');
+  } else if (verdict === 'youdotcom') {
+    verdictBar.className = 'verdict-bar verdict-youdotcom';
+    verdictBar.innerHTML = '<strong>Verdict: LLM + You.com path is better</strong>' + (verdictReasoning ? ' — ' + verdictReasoning : '');
+  } else if (verdict === 'native') {
+    verdictBar.className = 'verdict-bar verdict-native';
+    verdictBar.innerHTML = '<strong>Verdict: LLM + Native path is better</strong>' + (verdictReasoning ? ' — ' + verdictReasoning : '');
+  }
+
+  let ytotal = 0, ntotal = 0;
+  const rows = dims.map(d => {
+    const yv = ys[d] || 0, nv = ns[d] || 0;
+    ytotal += yv; ntotal += nv;
+    let ywClass = 'val-ydc', nwClass = 'val-native';
+    if (yv > nv) ywClass += ' winner';
+    else if (nv > yv) nwClass += ' winner';
+    return `<tr><td class="row-label">${dimLabels[d]}</td><td class="${ywClass}">${yv}/5</td><td class="${nwClass}">${nv}/5</td></tr>`;
+  }).join('');
+
+  let ytClass = 'val-ydc', ntClass = 'val-native';
+  if (ytotal > ntotal) ytClass += ' winner';
+  else if (ntotal > ytotal) ntClass += ' winner';
+  const overallRow = `<tr style="border-top:2px solid #ddd5c8"><td class="row-label" style="font-weight:700">Overall</td><td class="${ytClass}" style="font-weight:700">${ytotal}/20</td><td class="${ntClass}" style="font-weight:700">${ntotal}/20</td></tr>`;
+  document.getElementById('judgeTableBody').innerHTML = rows + overallRow;
+
+  const reasoning = ['<h3>Judge Reasoning</h3>'];
+  if (ys.reasoning) reasoning.push(`<div><strong>LLM + You.com:</strong> ${ys.reasoning}</div>`);
+  if (ns.reasoning) reasoning.push(`<div><strong>LLM + Native:</strong> ${ns.reasoning}</div>`);
+  if (verdictReasoning) reasoning.push(`<div><strong>Overall:</strong> ${verdictReasoning}</div>`);
+  document.getElementById('judgeReasoning').innerHTML = reasoning.join('');
+
+  const judgeName = data.judge_model === 'openai' ? 'GPT-5.4' : 'Claude Sonnet';
+  document.getElementById('judgeMeta').textContent =
+    `Judge: ${judgeName} (blind evaluation, answers randomly assigned to A/B positions)`;
+}
+
+document.getElementById('cQuery').addEventListener('keydown', e => {
+  if (e.key === 'Enter') runComparison();
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// SAC COMPARISON TAB (You.com vs. Perplexity Sonar Deep Research)
+// ═══════════════════════════════════════════════════════════════════════
+
+let sacYdcData = null, sacPlxData = null;
+
+async function runSacComparison() {
+  const query = document.getElementById('sacQuery').value.trim();
+  const skipJudge = document.getElementById('sacSkipJudge').checked;
+  const btn = document.getElementById('sacRunBtn');
+  if (!query) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+  sacYdcData = null; sacPlxData = null;
+
+  document.getElementById('sacStatus').classList.add('visible');
+  document.getElementById('sacStatusText').textContent = 'Starting comparison...';
+  document.getElementById('sacResults').style.display = 'block';
+
+  // Reset panes
+  for (const prefix of ['sacYdc', 'sacPlx']) {
+    document.getElementById(prefix + 'Pane').classList.remove('loaded');
+    document.getElementById(prefix + 'Waiting').style.display = 'flex';
+    document.getElementById(prefix + 'Answer').style.display = 'none';
+    document.getElementById(prefix + 'Sources').style.display = 'none';
+    document.getElementById(prefix + 'Progress').innerHTML = '';
+    document.getElementById(prefix + 'ProgressWrap').classList.remove('visible', 'collapsed');
+  }
+  document.getElementById('sacSavingsBar').classList.remove('visible');
+  document.getElementById('sacMetricsSection').classList.remove('visible');
+  document.getElementById('sacJudgeSection').classList.remove('visible');
+  document.getElementById('sacGlossarySection').style.display = 'none';
+
+  try {
+    await streamSSE('/api/sac-compare',
+      { query, skip_judge: skipJudge },
+      handleSacEvent,
+      msg => { document.getElementById('sacStatusText').textContent = `Error: ${msg}`; }
+    );
+  } catch (err) {
+    document.getElementById('sacStatusText').textContent = `Error: ${err.message || err}`;
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Compare';
+}
+
+function handleSacEvent(event, data) {
+  switch (event) {
+    case 'status':
+      document.getElementById('sacStatusText').textContent = data.message;
+      break;
+    case 'progress': {
+      const prefix = data.path === 'youdotcom' ? 'sacYdc' : 'sacPlx';
+      const wrapEl = document.getElementById(prefix + 'ProgressWrap');
+      const logEl = document.getElementById(prefix + 'Progress');
+      wrapEl.classList.add('visible');
+      const line = document.createElement('div');
+      line.className = 'log-line';
+      line.textContent = data.message;
+      logEl.appendChild(line);
+      logEl.scrollTop = logEl.scrollHeight;
+      break;
+    }
+    case 'youdotcom':
+      sacYdcData = data;
+      paintSacPane('sacYdc', data);
+      break;
+    case 'perplexity':
+      sacPlxData = data;
+      paintSacPane('sacPlx', data);
+      if (sacYdcData && sacPlxData) { paintSacMetrics(); paintSacSavings(); }
+      break;
+    case 'judge':
+      paintSacJudge(data);
+      break;
+    case 'done':
+      document.getElementById('sacStatus').classList.remove('visible');
+      paintSacFootnote(data);
+      break;
+    case 'error':
+      document.getElementById('sacStatusText').textContent = `Error: ${data.message}`;
+      break;
+  }
+}
+
+function paintSacPane(prefix, data) {
+  document.getElementById(prefix + 'Waiting').style.display = 'none';
+  const wrap = document.getElementById(prefix + 'ProgressWrap');
+  wrap.classList.add('collapsed');
+  const logLines = document.getElementById(prefix + 'Progress').querySelectorAll('.log-line').length;
+  const toggle = wrap.querySelector('.progress-toggle');
+  if (toggle && logLines > 0) {
+    toggle.innerHTML = `<span class="arrow">&#9660;</span> Progress <span class="log-count">(${logLines} events)</span>`;
+  }
+  document.getElementById(prefix + 'Answer').style.display = 'block';
+  document.getElementById(prefix + 'Answer').innerHTML = renderMarkdown(data.answer);
+  const srcEl = document.getElementById(prefix + 'Sources');
+  srcEl.style.display = 'block';
+  srcEl.innerHTML = data.sources && data.sources.length
+    ? '<strong>Sources:</strong> ' + data.sources.map((u, i) =>
+        `<a href="${u}" target="_blank">[${i+1}]</a>`).join(' ')
+    : '<em>No sources</em>';
+  document.getElementById(prefix + 'Pane').classList.add('loaded');
+}
+
+function paintSacSavings() {
+  const y = sacYdcData, p = sacPlxData;
+  const bar = document.getElementById('sacSavingsBar');
+  const costDiff = p.cost - y.cost;
+  const costPct = p.cost > 0 ? Math.round(Math.abs(costDiff) / p.cost * 100) : 0;
+
+  if (costDiff > 0) {
+    bar.className = 'savings-bar visible';
+    bar.textContent = `You.com Research is ${costPct}% cheaper than Perplexity SaC for this query ($${Math.abs(costDiff).toFixed(5)} saved) — est. costs`;
+  } else if (costDiff < 0) {
+    bar.className = 'savings-bar visible negative';
+    bar.textContent = `Perplexity SaC is ${costPct}% cheaper than You.com Research for this query ($${Math.abs(costDiff).toFixed(5)} saved) — est. costs`;
+  } else {
+    bar.className = 'savings-bar visible';
+    bar.textContent = 'Estimated cost identical';
+  }
+}
+
+function makeSacRow(label, ydcVal, plxVal, opts = {}) {
+  const { lowerWins = false, yRaw, pRaw, indent = 0 } = opts;
+  let ywClass = 'val-ydc', pwClass = 'val-plx';
+  if (lowerWins && yRaw !== undefined && pRaw !== undefined) {
+    if (yRaw < pRaw) ywClass += ' winner';
+    else if (pRaw < yRaw) pwClass += ' winner';
+  }
+  const padLeft = indent * 16;
+  const labelStyle = indent === 0
+    ? `padding-left:${14 + padLeft}px; font-weight:600`
+    : `padding-left:${14 + padLeft}px; font-weight:400; font-size:12px; color:#8a8078`;
+  let ratioHtml = '<td class="ratio-cell">—</td>';
+  if (yRaw !== undefined && pRaw !== undefined && pRaw > 0) {
+    const ratio = yRaw / pRaw;
+    if (Math.abs(ratio - 1) < 0.005) {
+      ratioHtml = '<td class="ratio-cell">1.0x</td>';
+    } else if (lowerWins) {
+      const ratioLabel = ratio < 1
+        ? (ratio * 100).toFixed(0) + '% of Perplexity'
+        : ratio.toFixed(1) + 'x Perplexity';
+      const cls = ratio < 1 ? 'ratio-good' : 'ratio-bad';
+      ratioHtml = `<td class="ratio-cell ${cls}">${ratioLabel}</td>`;
+    } else {
+      ratioHtml = `<td class="ratio-cell">${ratio.toFixed(1)}x</td>`;
+    }
+  }
+  return `<tr>
+    <td class="row-label" style="${labelStyle}">${label}</td>
+    <td class="${ywClass}">${ydcVal}</td>
+    <td class="${pwClass}">${plxVal}</td>
+    ${ratioHtml}
+  </tr>`;
+}
+
+function paintSacMetrics() {
+  const y = sacYdcData, p = sacPlxData;
+  document.getElementById('sacTokenTableBody').innerHTML = [
+    makeSacRow('Total tokens', 'N/A', p.total_tokens ? p.total_tokens.toLocaleString() : '—',
+      { lowerWins: true, yRaw: undefined, pRaw: p.total_tokens }),
+    makeSacRow('Input tokens (query + search context)', 'N/A',
+      p.input_tokens ? p.input_tokens.toLocaleString() : '—',
+      { lowerWins: true, indent: 1 }),
+    makeSacRow('Output tokens (answer)', '~' + y.output_tokens.toLocaleString() + ' est.',
+      p.output_tokens ? p.output_tokens.toLocaleString() : '—',
+      { lowerWins: true, yRaw: undefined, pRaw: p.output_tokens, indent: 1 }),
+  ].join('') +
+  '<tr><td colspan="4" style="padding:6px 14px;font-size:11px;color:#a09888;font-style:italic">' +
+  'You.com Research API does not expose token counts. ' +
+  'Input tokens (query + all search snippets fed to the internal LLM) are unavailable. ' +
+  'Output tokens estimated from answer length only (1 token ≈ 4 chars) — the true total would be significantly higher.</td></tr>';
+
+  document.getElementById('sacPerfTableBody').innerHTML = [
+    makeSacRow('Total cost (est.)', '$' + y.cost.toFixed(5), '$' + p.cost.toFixed(5),
+      { lowerWins: true, yRaw: y.cost, pRaw: p.cost }),
+    makeSacRow('API call cost', '$' + y.cost_search.toFixed(5), '$' + p.cost_search.toFixed(5),
+      { lowerWins: true, yRaw: y.cost_search, pRaw: p.cost_search, indent: 1 }),
+    makeSacRow('Latency (end-to-end)', y.latency_ms.toLocaleString() + 'ms', p.latency_ms.toLocaleString() + 'ms',
+      { lowerWins: true, yRaw: y.latency_ms, pRaw: p.latency_ms }),
+    makeSacRow('Sandbox executions', '—', p.sandbox_executions !== undefined ? p.sandbox_executions : '?'),
+    makeSacRow('API calls', y.api_calls, p.api_calls),
+    makeSacRow('Sources returned', y.sources.length, p.sources.length,
+      { yRaw: y.sources.length, pRaw: p.sources.length }),
+  ].join('');
+
+  document.getElementById('sacMetricsSection').classList.add('visible');
+  document.getElementById('sacGlossarySection').style.display = 'block';
+}
+
+function paintSacFootnote(doneData) {
+  const p = doneData.pricing;
+  if (!p) return;
+  document.getElementById('sacCostFootnote').innerHTML =
+    `You.com Research API @ ~$${p.ydc_research_per_call.toFixed(3)}/call (effort=${p.ydc_research_effort}, ${p.ydc_research_note}) · ` +
+    `Perplexity SaC @ ~$${p.plx_sac_per_call.toFixed(3)}/call (${p.plx_sac_note}).`;
+}
+
+function paintSacJudge(data) {
+  const section = document.getElementById('sacJudgeSection');
+  if (data.error) { section.classList.remove('visible'); return; }
+  section.classList.add('visible');
+
+  // judge returns youdotcom_scores vs native_scores; here "native" = Perplexity
+  const ys = data.youdotcom_scores || {}, ps = data.native_scores || {};
+  const dims = ['completeness', 'relevance', 'specificity', 'citation_quality'];
+  const dimLabels = { completeness: 'Completeness', relevance: 'Relevance', specificity: 'Specificity', citation_quality: 'Citation Quality' };
+
+  const verdict = data.verdict || 'comparable';
+  const verdictReasoning = data.verdict_reasoning || '';
+  const verdictBar = document.getElementById('sacVerdictBar');
+  if (verdict === 'comparable') {
+    verdictBar.className = 'verdict-bar verdict-comparable';
+    verdictBar.innerHTML = '<strong>Verdict: Comparable</strong>' + (verdictReasoning ? ' — ' + verdictReasoning : '');
+  } else if (verdict === 'youdotcom') {
+    verdictBar.className = 'verdict-bar verdict-youdotcom';
+    verdictBar.innerHTML = '<strong>Verdict: You.com Research is better</strong>' + (verdictReasoning ? ' — ' + verdictReasoning : '');
+  } else if (verdict === 'native') {
+    verdictBar.className = 'verdict-bar verdict-perplexity';
+    verdictBar.innerHTML = '<strong>Verdict: Perplexity SaC is better</strong>' + (verdictReasoning ? ' — ' + verdictReasoning : '');
+  }
+
+  let ytotal = 0, ptotal = 0;
+  const rows = dims.map(d => {
+    const yv = ys[d] || 0, pv = ps[d] || 0;
+    ytotal += yv; ptotal += pv;
+    let ywClass = 'val-ydc', pwClass = 'val-plx';
+    if (yv > pv) ywClass += ' winner';
+    else if (pv > yv) pwClass += ' winner';
+    return `<tr><td class="row-label">${dimLabels[d]}</td><td class="${ywClass}">${yv}/5</td><td class="${pwClass}">${pv}/5</td></tr>`;
+  }).join('');
+
+  let ytClass = 'val-ydc', ptClass = 'val-plx';
+  if (ytotal > ptotal) ytClass += ' winner';
+  else if (ptotal > ytotal) ptClass += ' winner';
+  const overallRow = `<tr style="border-top:2px solid #ddd5c8"><td class="row-label" style="font-weight:700">Overall</td><td class="${ytClass}" style="font-weight:700">${ytotal}/20</td><td class="${ptClass}" style="font-weight:700">${ptotal}/20</td></tr>`;
+  document.getElementById('sacJudgeTableBody').innerHTML = rows + overallRow;
+
+  const reasoning = ['<h3>Judge Reasoning</h3>'];
+  if (ys.reasoning) reasoning.push(`<div><strong>You.com Research:</strong> ${ys.reasoning}</div>`);
+  if (ps.reasoning) reasoning.push(`<div><strong>Perplexity SaC:</strong> ${ps.reasoning}</div>`);
+  if (verdictReasoning) reasoning.push(`<div><strong>Overall:</strong> ${verdictReasoning}</div>`);
+  document.getElementById('sacJudgeReasoning').innerHTML = reasoning.join('');
+
+  document.getElementById('sacJudgeMeta').textContent =
+    'Judge: GPT-5.4 (blind evaluation, answers randomly assigned to A/B positions)';
+}
+
+document.getElementById('sacQuery').addEventListener('keydown', e => {
+  if (e.key === 'Enter') runSacComparison();
+});
+
+// ── Cost math popup ─────────────────────────────────────────────────────────
+
+function fmt(n, decimals = 6) {
+  return '$' + (n || 0).toFixed(decimals);
+}
+
+function buildCostPopup(side) {
+  const d = side === 'ydc' ? ydcData : nativeData;
+  const p = pricing;
+  if (!d || !p) return null;
+
+  const label = side === 'ydc' ? 'You.com Search path' : 'Native Search path';
+  const inRate  = p.input_cost_per_m  / 1_000_000;
+  const outRate = p.output_cost_per_m / 1_000_000;
+  const searchRate = side === 'ydc'
+    ? p.ydc_search_per_1k / 1000
+    : p.native_search_per_1k / 1000;
+
+  const inCost     = d.input_tokens  * inRate;
+  const outCost    = d.output_tokens * outRate;
+  const llmTotal   = inCost + outCost;
+  const searchCost = d.search_calls  * searchRate;
+  const total      = llmTotal + searchCost;
+
+  const searchLabel = side === 'ydc' ? 'You.com queries' : 'Native search calls';
+
+  return `
+    <h4>${label}</h4>
+    <div class="popup-section">
+      <div class="popup-section-label">LLM Inference</div>
+      <div class="popup-line">
+        <span class="desc">${d.input_tokens.toLocaleString()} input tokens × $${p.input_cost_per_m}/M</span>
+        <span class="val">${fmt(inCost)}</span>
+      </div>
+      <div class="popup-line">
+        <span class="desc">${d.output_tokens.toLocaleString()} output tokens × $${p.output_cost_per_m}/M</span>
+        <span class="val">${fmt(outCost)}</span>
+      </div>
+      <div class="popup-line" style="font-weight:600; border-top:1px dashed #ede6d8; margin-top:4px; padding-top:4px;">
+        <span class="desc">LLM subtotal</span>
+        <span class="val">${fmt(llmTotal)}</span>
+      </div>
+    </div>
+    <div class="popup-section">
+      <div class="popup-section-label">Search</div>
+      <div class="popup-line">
+        <span class="desc">${d.search_calls} ${searchLabel} × $${(searchRate * 1000).toFixed(3)}/1k</span>
+        <span class="val">${fmt(searchCost)}</span>
+      </div>
+    </div>
+    <div class="popup-total">
+      <span>Total cost</span>
+      <span>${fmt(total)}</span>
+    </div>`;
+}
+
+function showCostPopup(side, anchorEl) {
+  const popup = document.getElementById('costPopup');
+  const content = buildCostPopup(side);
+  if (!content) return;
+
+  popup.innerHTML = `<span class="popup-close" onclick="hideCostPopup()">✕</span>` + content;
+
+  // Position near the anchor
+  const rect = anchorEl.getBoundingClientRect();
+  popup.classList.add('visible');
+
+  const pw = popup.offsetWidth;
+  const ph = popup.offsetHeight;
+  let left = rect.left + rect.width / 2 - pw / 2;
+  let top  = rect.bottom + 8;
+
+  // Keep inside viewport
+  left = Math.max(8, Math.min(left, window.innerWidth - pw - 8));
+  if (top + ph > window.innerHeight - 8) top = rect.top - ph - 8;
+
+  popup.style.left = left + 'px';
+  popup.style.top  = top  + 'px';
+}
+
+function hideCostPopup() {
+  document.getElementById('costPopup').classList.remove('visible');
+}
+
+document.addEventListener('click', e => {
+  const popup = document.getElementById('costPopup');
+  if (!popup.classList.contains('visible')) return;
+  if (!popup.contains(e.target) && !e.target.closest('.cost-clickable')) {
+    hideCostPopup();
+  }
+});
+</script>
+
+<div id="costPopup"></div>
+
+<!-- Diagram zoom modal -->
+<div id="diagramOverlay" onclick="if(event.target===this)closeDiagram()">
+  <div id="diagramModalBox">
+    <button id="diagramCloseBtn" onclick="closeDiagram()" title="Close">✕</button>
+    <div id="diagramModalContent"></div>
+  </div>
+</div>
+
+<!-- Code info modal -->
+<div id="codeInfoOverlay" onclick="if(event.target===this)hideCodeInfo()">
+  <div id="codeInfoModal">
+    <button class="info-close" onclick="hideCodeInfo()">✕</button>
+    <div id="codeInfoContent"></div>
+  </div>
+</div>
+
+<script>
+// ── Code info data ───────────────────────────────────────────────────────────
+
+const CODE_INFO = {
+
+  // ── Comparison tab entries (two-tab: ydc + native) ──────────────────────
+  // Note: playground ℹ button reuses these compare-* entries (defaulting to ydc tab).
+  // playground-* entries were removed — no longer needed.
+
+  'compare-claude': {
+    title: 'claude-sonnet-4-6',
+    ydc: {
+      file: 'comparison/compare.py → _run_youdotcom_anthropic()',
+      api: 'Anthropic Messages API · api.anthropic.com/v1/messages  +  You.com Search API',
+      summary: 'Claude receives a <code>web_search</code> tool declaration in the Messages API call. When it decides to search, it returns <code>stop_reason="tool_use"</code> with a <code>tool_use</code> content block containing the query. The runner executes the You.com search, injects results as a <code>tool_result</code> message, and loops. Claude continues until it stops calling tools. All search context is explicit in the message history — every token is visible and countable.',
+      learnings: [
+        '<strong>Two separate tool schemas required.</strong> Anthropic uses <code>input_schema</code> (JSON Schema inside the tool definition); OpenAI uses <code>parameters</code>. Sending OpenAI format to Anthropic causes a validation error. We maintain TOOL_SCHEMA_ANTHROPIC and TOOL_SCHEMA separately.',
+        '<strong>stop_reason vs finish_reason.</strong> Anthropic signals a pending tool call via <code>stop_reason == "tool_use"</code>. OpenAI uses <code>finish_reason == "tool_calls"</code>. These are different keys on different objects — copy-pasting the OpenAI loop into the Anthropic path silently drops all searches.',
+        '<strong>search_context_tokens is estimated, not reported.</strong> Anthropic does not break down token usage by message. We estimate search context as <code>total_input − baseline_input × api_calls</code> where baseline_input is the first-round token count before any results were added.',
+        '<strong>You.com interface="direct_api" matters.</strong> This header signals a raw API integration vs. a search widget, affecting result ranking, quota tracking, and rate limit buckets. Always set it explicitly.',
+        '<strong>Source URLs come from You.com structured JSON, not from LLM output.</strong> We parse You.com\'s <code>hits[].url</code> fields directly — never regex the answer text for links.',
+      ],
+      defaults: [
+        ['Tool schema', 'TOOL_SCHEMA_ANTHROPIC', 'Anthropic format: tool definition uses input_schema (JSON Schema). The OpenAI "parameters" format causes a 400 error.'],
+        ['stop_reason check', 'stop_reason == "tool_use"', 'Anthropic signals pending tool calls here — not in finish_reason like OpenAI.'],
+        ['Max tool rounds', '15', 'Hard cap prevents runaway loops. Most queries finish in 1–3 rounds; 15 gives headroom for multi-hop research without running away.'],
+        ['You.com interface', 'direct_api', 'Signals raw API access — affects result ranking and quota bucket. Set explicitly on every call.'],
+        ['Source extraction', 'hits[].url from You.com JSON', 'Parsed directly from structured JSON response, not from LLM output. LLM citation text [N] is model-generated and may not match.'],
+        ['search_context_tokens', 'total_input − baseline × rounds', 'Estimated — Anthropic does not report per-message token breakdown. Baseline is round-1 input before any search results are injected.'],
+        ['Judge', 'OpenAI GPT', 'Cross-provider: GPT judges Claude output, Claude judges GPT output. Avoids self-scoring bias.'],
+        ['Max output tokens', '4096', 'Covers detailed multi-section answers. Raising this significantly increases cost on long-context queries.'],
+      ],
+      alternatives: [
+        'claude-opus-4-8 for higher quality at ~5× cost — same code path, different model ID.',
+        'Add recency="day" or recency="week" to the You.com tool call to restrict to fresh results on time-sensitive queries.',
+        'Lower MAX_TOOL_ROUNDS to 3–5 for latency-sensitive deployments — most factual queries resolve in 1–2 rounds.',
+        'Add domain filters to the You.com tool schema to restrict sources (e.g., site:reuters.com for news queries).',
+        'Enable prompt caching (cache_control on system message) to cut input token cost ~80% on repeated similar queries.',
+      ],
+    },
+    native: {
+      file: 'comparison/compare.py → _run_native_anthropic()',
+      api: 'Anthropic Messages API (streaming) · web_search_20260209 built-in tool',
+      summary: 'Claude\'s web search is fully server-side — Anthropic executes searches internally, injects results into Claude\'s context, and Claude generates a final answer. The client declares the tool, streams the response, and collects content blocks. No search loop management needed — Anthropic handles it. Citations come back as structured annotation objects with character offsets, not as inline [N] text.',
+      learnings: [
+        '<strong>Non-streaming silently times out.</strong> Tried non-streaming first. On complex queries that trigger multiple internal search rounds, the single HTTP call goes silent for 30–90s while Anthropic\'s server is searching. No data comes back until it\'s done — long enough to hit client read timeouts. Switched to streaming: each internal search event arrives as an SSE chunk, keeping the connection alive.',
+        '<strong>Citations are structured annotations, not inline text.</strong> The final text block\'s <code>block.text</code> is plain prose — no [N] markers embedded. Citations come as <code>block.citations</code>: a list of objects with <code>start_char_index</code>, <code>end_char_index</code>, and <code>url</code>. We inject [N] markers at the end_char_index positions by building a character-offset insertion map. Without this, sources show in the footer but nothing is cited inline.',
+        '<strong>web_search_20260209 vs 20250305.</strong> The newer tool ID (20260209) enables code execution — Claude\'s interpreter can post-process search results cross-references. Anthropic reports ~11% accuracy improvement. Tradeoff: code execution can cascade (process results → decide to search again), making token cost less predictable. The older 20250305 is more predictable but less accurate.',
+        '<strong>source URLs come from web_search_tool_result blocks, not annotations.</strong> The structured <code>web_search_tool_result</code> blocks in the response contain <code>content[].url</code> for each source. We collect these to populate the sources list. The text block citations reference these same URLs via annotation objects.',
+        '<strong>search_calls counted from web_search_tool_result blocks.</strong> One block = one search round. Multiple rounds produce multiple blocks in the response content array.',
+      ],
+      defaults: [
+        ['Tool', 'web_search_20260209', 'Newer backend — supports code execution for post-processing results. The older 20250305 does not support code execution.'],
+        ['Code execution', 'ON (Anthropic default)', 'Anthropic\'s built-in code interpreter post-processes search results. ~11% accuracy gain reported. Can cascade into extra search rounds on complex queries.'],
+        ['Streaming', 'Required', 'Without streaming, multi-round server-side searches cause silent read timeouts. Streaming keeps connection alive and surfaces real-time progress events.'],
+        ['Citation injection', 'Character-offset map from block.citations', 'Citations are annotation objects with start/end char indices. We walk the text character-by-character and insert [N] markers at each end_char_index.'],
+        ['Source extraction', 'web_search_tool_result.content[].url', 'Structured URL fields in search result blocks. No regex needed.'],
+        ['Agentic loop', 'Server-side (Anthropic)', 'Client streams and collects — Anthropic decides when to search and when to stop. No loop management code needed.'],
+        ['Max output tokens', '4096', 'Same as YDC path. Native search results are injected into context server-side — input tokens are higher than YDC path for the same query.'],
+      ],
+      alternatives: [
+        'Disable code execution: add <code>"allowed_callers": ["direct"]</code> to the tool config to prevent cascading searches and make token cost more predictable.',
+        'Use web_search_20250305 for the older backend — no code execution, more predictable token usage, ~11% lower accuracy on complex queries.',
+        'Switch to Opus 4.8 on this path for higher quality — same streaming implementation, same citation injection, just a different model ID and higher token cost.',
+      ],
+    },
+  },
+
+  'compare-claude-opus': {
+    title: 'claude-opus-4-8',
+    ydc: {
+      file: 'comparison/compare.py → _run_youdotcom_anthropic()',
+      api: 'Anthropic Messages API · api.anthropic.com/v1/messages  +  You.com Search API',
+      summary: 'Identical code path to Claude Sonnet 4.6 — same tool_use loop, same TOOL_SCHEMA_ANTHROPIC, same stop_reason check. The model ID is the only code difference. Opus 4.8 uses a rewritten tokenizer that produces ~30% more tokens than Sonnet 4.6 for the same input text, so token counts and inferred costs will be higher even on equivalent queries. Judge is OpenAI GPT.',
+      learnings: [
+        '<strong>New tokenizer = higher token counts for same text.</strong> Opus 4.8\'s tokenizer is not backward-compatible with Sonnet 4.6. The same search results and system prompt that cost 2,000 input tokens with Sonnet will cost ~2,600 with Opus. Cost comparisons between the two models require this adjustment.',
+        '<strong>Extended thinking disabled for search tasks.</strong> Opus 4.8 supports thinking blocks (set <code>thinking={"type":"enabled","budget_tokens":N}</code>). Explicitly disabled here: web search tasks are I/O-bound, not reasoning-bound. The bottleneck is search latency and context length, not reasoning depth. Enabling thinking adds reasoning_tokens cost with no expected quality gain on factual retrieval queries.',
+        '<strong>Same API surface as Sonnet.</strong> Both use <code>stop_reason == "tool_use"</code>, <code>TOOL_SCHEMA_ANTHROPIC</code>, and the same tool_result loop. No code changes needed when switching model IDs between Claude models.',
+      ],
+      defaults: [
+        ['Model', 'claude-opus-4-8', 'Highest-capability Anthropic model. Same API as Sonnet — swap model ID only.'],
+        ['Tokenizer', 'Opus 4.8 (new)', '~30% more tokens than Sonnet 4.6 for identical input. Token counts here are NOT directly comparable to Sonnet 4.6 counts.'],
+        ['Extended thinking', 'Disabled', 'Search tasks are I/O-bound. Thinking adds reasoning_tokens cost (~$5/M) with no expected quality uplift on factual lookup.'],
+        ['Tool schema', 'TOOL_SCHEMA_ANTHROPIC', 'Identical to Sonnet path — Anthropic tool format is consistent across all Claude models.'],
+        ['stop_reason check', 'stop_reason == "tool_use"', 'Same Anthropic signaling convention as all Claude models.'],
+        ['Max tool rounds', '15', 'Same cap. Opus typically uses fewer rounds than Sonnet due to stronger single-pass reasoning.'],
+        ['Judge', 'OpenAI GPT', 'Cross-provider judging. GPT judges Claude output to avoid self-scoring bias.'],
+      ],
+      alternatives: [
+        'Enable thinking for complex multi-step reasoning tasks: <code>betas=["thinking-2025-05-14"]</code> + <code>thinking={"type":"enabled","budget_tokens":5000}</code>.',
+        'claude-sonnet-4-6 at ~5× lower cost for queries where the quality difference is not observable.',
+        'Prompt caching (cache_control on system message) cuts input cost ~80% on repeated queries — especially valuable at Opus pricing.',
+      ],
+    },
+    native: {
+      file: 'comparison/compare.py → _run_native_anthropic()',
+      api: 'Anthropic Messages API (streaming) · web_search_20260209 built-in tool',
+      summary: 'Same streaming native search implementation as Claude Sonnet 4.6 — server-side search via web_search_20260209, streamed to prevent silent timeouts, citations injected from structured annotation objects. Key difference vs. Sonnet: Opus 4.8\'s new tokenizer means search results injected into context cost more input tokens at the same dollar rate, making native search relatively more expensive here than on the Sonnet path.',
+      learnings: [
+        '<strong>Tokenizer amplifies native search cost.</strong> Native search injects raw web page content into Claude\'s context (as search result tokens). With Opus 4.8\'s ~30% larger tokenizer, those same web pages cost proportionally more in input tokens. This is the main cost driver difference between Opus and Sonnet on the native path.',
+        '<strong>Same citation injection approach as Sonnet.</strong> web_search_20260209 returns <code>block.citations</code> annotation objects with character offsets. We inject [N] markers identically — no model-specific code needed.',
+        '<strong>Code execution cascade risk is higher with Opus.</strong> Opus is more likely to attempt multi-step reasoning over search results — triggering the code execution path more aggressively, which can cascade into additional search rounds. More thorough, but less predictable cost.',
+      ],
+      defaults: [
+        ['Tool', 'web_search_20260209', 'Same as Sonnet — current Anthropic native search backend with code execution support.'],
+        ['Code execution', 'ON (Anthropic default)', 'Same as Sonnet. Opus is more likely to use it aggressively — consider disabling if token cost predictability matters.'],
+        ['Streaming', 'Required', 'Same reason as Sonnet — multi-round server-side searches cause silent timeouts without streaming.'],
+        ['Citation injection', 'Character-offset map from block.citations', 'Identical to Sonnet path — citation annotation format is consistent across Claude models.'],
+        ['Tokenizer impact', '~30% more tokens per byte vs Sonnet', 'Search result content costs proportionally more in input tokens. Native path input_tokens will be higher than the equivalent Sonnet run.'],
+        ['Agentic loop', 'Server-side (Anthropic)', 'Same as Sonnet — Anthropic manages search decisions, client only streams and collects.'],
+      ],
+      alternatives: [
+        'Disable code execution to make token cost more predictable: <code>"allowed_callers": ["direct"]</code>.',
+        'Use Sonnet 4.6 for 5× lower cost on the same native search path — identical code, different model ID.',
+      ],
+    },
+  },
+
+  'compare-gpt5.4': {
+    title: 'gpt-5.4',
+    ydc: {
+      file: 'comparison/compare.py → _run_youdotcom_openai()',
+      api: 'OpenAI Chat Completions API · api.openai.com/v1/chat/completions  +  You.com Search API',
+      summary: 'GPT receives a function declaration for <code>web_search</code>. When it decides to search, it returns <code>finish_reason="tool_calls"</code> with a <code>tool_calls</code> list on the message. The runner executes You.com search, appends results as a <code>tool</code> role message, and loops. GPT continues generating until <code>finish_reason="stop"</code>. All search context is explicit in the message history.',
+      learnings: [
+        '<strong>max_tokens is silently ignored on GPT-5+.</strong> Tried max_tokens=4096 first — responses were being cut short with no error. GPT-5+ requires max_completion_tokens. Using max_tokens on these models is silently ignored, which causes truncated answers. Must use max_completion_tokens.',
+        '<strong>finish_reason vs stop_reason.</strong> OpenAI signals tool calls via <code>finish_reason == "tool_calls"</code> on <code>response.choices[0]</code>. Anthropic uses <code>stop_reason == "tool_use"</code> on the response object directly. These are structurally different — the Anthropic loop check fails silently on GPT if copy-pasted.',
+        '<strong>Tool schema uses "parameters", not "input_schema".</strong> OpenAI tool definitions use <code>parameters</code> (JSON Schema object). Anthropic uses <code>input_schema</code>. Sending Anthropic format to OpenAI causes a validation error. Two separate schema constants maintained: TOOL_SCHEMA and TOOL_SCHEMA_ANTHROPIC.',
+        '<strong>Tool call arguments are a JSON string, not a dict.</strong> OpenAI returns <code>tool_call.function.arguments</code> as a JSON-encoded string, not a parsed dict. Must call <code>json.loads()</code> before reading query parameters.',
+        '<strong>Source URLs come from You.com structured JSON.</strong> Parsed from <code>hits[].url</code> fields — not from the model\'s citation text, which may hallucinate or abbreviate URLs.',
+      ],
+      defaults: [
+        ['Max tokens param', 'max_completion_tokens=4096', 'GPT-5+ silently ignores max_tokens. Must use max_completion_tokens or responses get truncated with no error.'],
+        ['Tool schema', 'TOOL_SCHEMA (OpenAI format)', 'Uses "parameters" key with JSON Schema. Different from Anthropic\'s "input_schema" — two separate constants maintained.'],
+        ['finish_reason check', 'finish_reason == "tool_calls"', 'OpenAI signals pending tool calls here. Anthropic uses stop_reason on a different object.'],
+        ['Tool args parsing', 'json.loads(tool_call.function.arguments)', 'OpenAI returns arguments as a JSON string, not a dict. Must parse explicitly.'],
+        ['Max tool rounds', '15', 'Same cap as all models. GPT-5.4 typically uses 1–3 rounds for factual queries.'],
+        ['You.com interface', 'direct_api', 'Same as Claude path — signals raw API access for result ranking and quota tracking.'],
+        ['Source extraction', 'hits[].url from You.com JSON', 'Parsed from structured You.com response, not from GPT\'s citation text.'],
+        ['Judge', 'Anthropic Claude', 'Cross-provider: Claude judges GPT output to avoid self-scoring bias.'],
+      ],
+      alternatives: [
+        'parallel_tool_calls=True to let GPT issue multiple You.com searches in a single round — increases throughput but makes per-search cost tracking harder.',
+        'Add recency="day" to the You.com tool schema for time-sensitive queries.',
+        'gpt-5.5 for higher quality at 2× cost — identical code path, different model ID and max_completion_tokens value.',
+        'Lower MAX_TOOL_ROUNDS to 3–5 for latency-sensitive use cases.',
+      ],
+    },
+    native: {
+      file: 'comparison/compare.py → _run_native_openai()',
+      api: 'OpenAI Responses API · api.openai.com/v1/responses  (NOT chat.completions)',
+      summary: 'GPT-5+ native web search requires the Responses API — it is not available in Chat Completions. The client makes a single call; OpenAI handles multiple internal search rounds and returns all output items (web_search_call + message) in one response. Source citations come as <code>url_citation</code> annotation objects with character offsets on output_text items.',
+      learnings: [
+        '<strong>Chat Completions does NOT support web_search for GPT-5+.</strong> Tried adding <code>{"type":"web_search"}</code> to the tools array in a chat.completions call — got a 400 error ("web_search is not supported in this API"). Must use <code>client.responses.create()</code> with the Responses API endpoint.',
+        '<strong>Citations are url_citation annotations, not inline text.</strong> The model\'s answer text contains bare domain names like "(nhl.com)" embedded in prose. Separately, the output_text content part has <code>annotations</code>: a list of <code>url_citation</code> objects with <code>start_index</code>, <code>end_index</code>, <code>url</code>, and <code>title</code>. We inject [N] markers at end_index positions using a character-offset insertion map.',
+        '<strong>Response structure is completely different from Chat Completions.</strong> Responses API returns <code>response.output</code> (a list of items) instead of <code>response.choices</code>. Each item has a <code>type</code>: web_search_call for search rounds, message for the final answer. Accessing <code>choices[0]</code> on a Responses API response raises an AttributeError.',
+        '<strong>search_context_size controls web content depth per round.</strong> "medium" fetches a balanced amount of page content per search. "high" fetches more (better coverage, more tokens). "low" is faster and cheaper. We default to "medium" — running "high" on the native path doubles search content tokens.',
+        '<strong>web_search_call items have no query field by default.</strong> The query the model used internally is not always surfaced. We attempt to read it from the item but fall back to "(internal)" when absent.',
+      ],
+      defaults: [
+        ['API endpoint', 'client.responses.create()', 'Responses API — required for native web search on GPT-5+. chat.completions rejects the web_search tool with a 400 error.'],
+        ['search_context_size', 'medium', 'Controls web content fetched per search round. low=faster/cheaper, high=thorough/expensive. "medium" balances coverage vs. token cost.'],
+        ['Citation injection', 'Character-offset map from url_citation annotations', 'Annotations carry start_index/end_index into output_text. We insert [N] markers at end_index positions.'],
+        ['Source extraction', 'url_citation annotations', 'Structured URL fields with title — no regex needed. The inline domain text (e.g., "(nhl.com)") in the prose is model-generated and unreliable.'],
+        ['Agentic loop', 'Single call (Responses API handles internally)', 'OpenAI runs multi-round search server-side. One API call returns all output items.'],
+        ['Usage tracking', 'response.usage.input_tokens / output_tokens', 'Same field names as Chat Completions — but input_tokens includes search content injected server-side.'],
+      ],
+      alternatives: [
+        'search_context_size="high" for complex queries requiring deep multi-source coverage (at proportionally higher token cost).',
+        'search_context_size="low" for quick factual lookups where latency and cost matter more than coverage.',
+        'gpt-5.5 for higher quality — identical Responses API code path, 2× token cost.',
+      ],
+    },
+  },
+
+  'compare-gpt5.5': {
+    title: 'gpt-5.5',
+    ydc: {
+      file: 'comparison/compare.py → _run_youdotcom_openai()',
+      api: 'OpenAI Chat Completions API · api.openai.com/v1/chat/completions  +  You.com Search API',
+      summary: 'Identical code path to GPT-5.4 — same function calling loop, same tool schema, same finish_reason check. The model ID and token cost are the only differences. GPT-5.5 is the higher-tier GPT-5 model with stronger reasoning and longer context at 2× the per-token cost.',
+      learnings: [
+        '<strong>Same code path as gpt-5.4 — no API changes needed.</strong> Both models use Chat Completions, the same TOOL_SCHEMA, the same finish_reason loop. Model ID swap is the only code change.',
+        '<strong>max_completion_tokens still required.</strong> Same as gpt-5.4 — max_tokens is silently ignored. max_completion_tokens is set explicitly.',
+        '<strong>Judge is Claude (same as gpt-5.4).</strong> Cross-provider judging: Claude judges GPT output. The judge model itself does not change between gpt-5.4 and gpt-5.5 runs.',
+      ],
+      defaults: [
+        ['Model', 'gpt-5.5', 'Higher-tier GPT-5 model. Same Chat Completions API surface as gpt-5.4 — no code changes.'],
+        ['Max tokens param', 'max_completion_tokens=4096', 'Same as gpt-5.4 — max_tokens silently ignored on GPT-5+.'],
+        ['Tool schema', 'TOOL_SCHEMA (OpenAI format)', 'Identical to gpt-5.4 path.'],
+        ['finish_reason check', 'finish_reason == "tool_calls"', 'Same OpenAI convention as gpt-5.4.'],
+        ['Max tool rounds', '15', 'Same cap as all models.'],
+        ['Judge', 'Anthropic Claude', 'Cross-provider judging — same as gpt-5.4.'],
+        ['Cost vs gpt-5.4', '$5/$30 vs $2.50/$15 per 1M tokens', '2× cost at same quality floor. Use gpt-5.5 when quality uplift is observable on your queries.'],
+      ],
+      alternatives: [
+        'gpt-5.4 at half the cost — identical code path. Use 5.5 only when quality difference is observable.',
+        'parallel_tool_calls=True for multi-search-per-round (harder to track per-search costs).',
+        'Add recency="day" to the You.com tool schema for time-sensitive queries.',
+      ],
+    },
+    native: {
+      file: 'comparison/compare.py → _run_native_openai()',
+      api: 'OpenAI Responses API · api.openai.com/v1/responses  (NOT chat.completions)',
+      summary: 'Same Responses API native search path as gpt-5.4 — same code, same search_context_size, same url_citation annotation injection. GPT-5.5 is the higher-quality model; the API mechanics are identical. Native search per-call fee is the same ($10/1k); token cost is 2× higher.',
+      learnings: [
+        '<strong>Identical to gpt-5.4 native — same implementation, same learnings apply.</strong> The Responses API, url_citation annotation injection, search_context_size options, and single-call architecture are all identical. See the gpt-5.4 native learnings for the full context.',
+        '<strong>Chat Completions still does not support web_search for gpt-5.5.</strong> Same constraint as gpt-5.4 — must use Responses API.',
+        '<strong>Per-search fee is the same; token cost is 2×.</strong> $10/1k searches for both. But the search content tokens injected server-side are billed at gpt-5.5\'s higher model rate.',
+      ],
+      defaults: [
+        ['API endpoint', 'client.responses.create()', 'Required — same as gpt-5.4. Chat Completions rejects web_search.'],
+        ['search_context_size', 'medium', 'Same default as gpt-5.4. "high" is proportionally more expensive here due to 2× token rate.'],
+        ['Citation injection', 'Character-offset map from url_citation annotations', 'Identical to gpt-5.4 path.'],
+        ['Source extraction', 'url_citation annotations', 'Identical to gpt-5.4 path.'],
+        ['Cost vs gpt-5.4 native', '$5/$30 vs $2.50/$15 per 1M tokens', 'Per-search fee identical; token cost 2×. Search content tokens (billed at model input rate) are the dominant cost driver on native path.'],
+      ],
+      alternatives: [
+        'gpt-5.4 native for identical quality at half the token cost — same Responses API code path.',
+        'search_context_size="low" to cut search content token cost if coverage is sufficient.',
+      ],
+    },
+  },
+
+  'compare-kimi': {
+    title: 'kimi-k2.6',
+    ydc: {
+      file: 'comparison/compare.py → _run_youdotcom_openai()',
+      api: 'OpenAI-compatible Chat Completions · api.moonshot.ai/v1  +  You.com Search API',
+      summary: 'Kimi uses the same OpenAI-compatible function calling loop as GPT — finish_reason="tool_calls" triggers You.com search, results appended as tool role message, loop until finish_reason="stop". The international Moonshot endpoint is used; China endpoint requires a separate account. K2.6 does not enable thinking by default on this path.',
+      learnings: [
+        '<strong>api.moonshot.ai vs api.moonshot.cn.</strong> Moonshot AI has separate endpoints for international and China regions. api.moonshot.cn requires a China-region account registration. api.moonshot.ai is the international endpoint and works with a standard API key. Always use the international endpoint.',
+        '<strong>K2.6 does not enable thinking by default.</strong> Unlike K2.7, K2.6 does not enable extended thinking mode without an explicit extra_body parameter. No extra_body needed for the You.com path — this is one less config step vs. Qwen.',
+        '<strong>Same OpenAI-compatible loop as GPT.</strong> finish_reason, tool_calls structure, tool role messages — all identical to the GPT path. The same _run_youdotcom_openai() function handles Kimi, GPT, and Qwen with no model-specific branching needed.',
+        '<strong>Tool argument JSON string same as GPT.</strong> tool_call.function.arguments is a JSON-encoded string. Same json.loads() parsing needed.',
+      ],
+      defaults: [
+        ['Endpoint', 'api.moonshot.ai/v1', 'International endpoint. api.moonshot.cn is China-region only — separate account required.'],
+        ['Tool schema', 'TOOL_SCHEMA (OpenAI format)', 'Moonshot\'s OpenAI-compatible API accepts the same tool schema as GPT.'],
+        ['finish_reason check', 'finish_reason == "tool_calls"', 'Same OpenAI-compatible convention.'],
+        ['Thinking', 'Not disabled (not needed)', 'K2.6 does not enable thinking by default. No extra_body required on this path.'],
+        ['Max tool rounds', '15', 'Same cap as all models.'],
+        ['Judge', 'Anthropic Claude', 'Cross-provider judging.'],
+      ],
+      alternatives: [
+        'kimi-k2.7-code for code-heavy tasks — stronger on programming and technical queries.',
+        'Add extra_body={"thinking":{"type":"enabled"}} if reasoning depth matters more than latency.',
+      ],
+    },
+    native: {
+      file: 'comparison/compare.py → _run_native_kimi()',
+      api: 'OpenAI-compatible Chat Completions · api.moonshot.ai/v1 with builtin_function $web_search',
+      summary: 'Kimi\'s native search uses a <code>builtin_function</code> tool type — unlike standard function calling where the client provides the search results, Moonshot executes the search internally before returning. The client echoes the tool call arguments back unchanged to advance the loop. Source URLs are never returned in any structured field — only via regex on the answer text.',
+      learnings: [
+        '<strong>Must use type="builtin_function", not "function".</strong> Tried declaring $web_search as a standard function-type tool. The API accepted it but never searched — the model responded from training data. Switching to <code>{"type":"builtin_function","function":{"name":"$web_search"}}</code> triggered live search immediately.',
+        '<strong>Echo trick: the search has already happened.</strong> When the model returns finish_reason="tool_calls" with a $web_search tool call, Moonshot has already executed the search internally — the model has seen the results. The client\'s job is only to send the raw <code>function_arguments</code> string back as the tool result content to advance the conversation loop. Sending empty content or modified arguments breaks the loop.',
+        '<strong>No structured source URLs anywhere.</strong> Tried reading URLs from: (1) tool_call.function.arguments — only contains {"search_id": "abc123"}, never URLs; (2) message annotations — Moonshot returns empty annotations=[]; (3) web_search_tool_result equivalent blocks — Kimi has no equivalent. Only option: regex the final answer text for markdown links and bare URLs.',
+        '<strong>action.query is always "Web search".</strong> DashScope-style action.queries is always None. The actual query string Kimi used is not exposed in the API. Display "(internal)" rather than showing the generic label.',
+        '<strong>Thinking MUST be disabled.</strong> K2.6 with thinking enabled adds 10–30s latency on search tasks. The extended reasoning loop runs to completion before the search results are processed — no quality benefit on factual queries, significant latency cost. Always set extra_body={"thinking":{"type":"disabled"}}.',
+        '<strong>Client-driven loop, unlike GPT Responses API or Qwen native.</strong> The loop must run in client code. Model returns tool_calls → client echoes → model continues, until finish_reason="stop". Cannot be done with a single API call.',
+      ],
+      defaults: [
+        ['Tool type', 'builtin_function', 'Kimi-specific type. "function" is accepted but does not trigger search — model uses training data silently.'],
+        ['Tool name', '$web_search', 'Dollar-sign prefix is required. $web_search triggers Moonshot\'s internal search engine.'],
+        ['Tool result', 'Echo function_arguments unchanged', 'The search is already done. Client echoes the exact arguments string back as the tool result to advance the loop.'],
+        ['Thinking', 'Disabled via extra_body={"thinking":{"type":"disabled"}}', 'K2.6 thinking adds 10–30s latency with no quality benefit on search tasks. Always disable.'],
+        ['Source extraction', 'Regex on answer text (markdown links + bare URLs)', 'No structured URL fields exist in Moonshot\'s response. Regex is the only option.'],
+        ['Agentic loop', 'Client-driven tool_calls loop', 'Unlike GPT Responses API, Kimi requires explicit client-side looping. Model returns tool_calls; client echoes; model continues.'],
+        ['Max tool rounds', '15', 'Same cap. Kimi typically uses 1–2 rounds.'],
+      ],
+      alternatives: [
+        'No alternative for source URL extraction — regex is the only available mechanism on Moonshot\'s API.',
+        'kimi-k2.7-code for code-heavy or technical queries.',
+        'Increase thinking budget if reasoning quality matters more than latency: extra_body={"thinking":{"type":"enabled","budget_tokens":3000}}.',
+      ],
+    },
+  },
+
+  'compare-qwen': {
+    title: 'qwen3.7-max',
+    ydc: {
+      file: 'comparison/compare.py → _run_youdotcom_openai()',
+      api: 'OpenAI-compatible Chat Completions · dashscope-intl.aliyuncs.com/compatible-mode/v1  +  You.com Search API',
+      summary: 'Qwen uses the same OpenAI-compatible function calling loop as GPT and Kimi. The Comparison tab uses the standard DashScope international endpoint — different from the private MaaS workspace endpoint used in the Playground. Both endpoints share the same DASHSCOPE_API_KEY but have different capabilities.',
+      learnings: [
+        '<strong>Two endpoints, same API key, different capabilities.</strong> The Playground uses a private MaaS workspace endpoint (DASHSCOPE_BASE_URL env var) pointing to an Alibaba Cloud workspace. The Comparison tab hardcodes the standard public DashScope international endpoint (dashscope-intl.aliyuncs.com/compatible-mode/v1). Both use the same DASHSCOPE_API_KEY. The workspace endpoint does NOT support the Responses API or native search — only Chat Completions.',
+        '<strong>enable_thinking must be explicitly disabled.</strong> Qwen3.7-max enables extended thinking by default when using the API. Not disabling it adds reasoning_tokens overhead to every call (~$1.25/M input at promo rate). Set extra_body={"enable_thinking": False} on every call.',
+        '<strong>Same OpenAI-compatible loop as GPT.</strong> finish_reason, tool_calls structure, tool role messages — identical. _run_youdotcom_openai() handles Qwen with no model-specific branching.',
+      ],
+      defaults: [
+        ['Endpoint (Comparison)', 'dashscope-intl.aliyuncs.com/compatible-mode/v1', 'Standard public DashScope international endpoint. The Playground uses the private MaaS workspace URL — these are different servers with different capabilities.'],
+        ['Endpoint (Playground)', 'DASHSCOPE_BASE_URL env var', 'Private MaaS workspace endpoint. No native search available here — only You.com path works in the Playground.'],
+        ['API key', 'DASHSCOPE_API_KEY', 'Same key works on both workspace and standard endpoints.'],
+        ['enable_thinking', 'False (extra_body)', 'Qwen3.7-max enables thinking by default. Disabled here — adds latency and reasoning_token cost with no quality benefit on factual search tasks.'],
+        ['Tool schema', 'TOOL_SCHEMA (OpenAI format)', 'DashScope\'s OpenAI-compatible endpoint accepts OpenAI tool schema format.'],
+        ['finish_reason check', 'finish_reason == "tool_calls"', 'Same OpenAI-compatible convention.'],
+        ['Judge', 'Anthropic Claude', 'Cross-provider judging.'],
+      ],
+      alternatives: [
+        'qwen3.5-plus or qwen3-max for lower cost on the You.com path.',
+        'Set enable_thinking=True if reasoning depth matters: extra_body={"enable_thinking": True, "thinking_budget": 3000}.',
+        'Add recency filters to the You.com tool schema for time-sensitive queries.',
+      ],
+    },
+    native: {
+      file: 'comparison/compare.py → _run_native_qwen()',
+      api: 'DashScope Responses API · dashscope-intl.aliyuncs.com/compatible-mode/v1  (tools: web_search)',
+      summary: 'Qwen native search uses the DashScope Responses API with an explicit <code>{"type":"web_search"}</code> tool declaration. DashScope handles the search loop internally and returns all output in a single response. Source URLs come from <code>item.action.sources</code> on web_search_call items — NOT from url_citation annotations (which are always empty).',
+      learnings: [
+        '<strong>enable_search via Chat Completions fails silently.</strong> The first approach was adding <code>extra_body={"enable_search": True}</code> to a Chat Completions call — the documented way to enable search for older Qwen models. For qwen3.7-max, the model accepted the call, ran, and returned an answer from training data. When asked "who won the 2026 men\'s Olympic hockey gold?", it responded "I cannot definitively state who won as those games have not taken place yet." The search never fired. No error was returned.',
+        '<strong>Responses API with explicit tool declaration is the correct path.</strong> Switching to <code>client.responses.create()</code> with <code>tools=[{"type":"web_search"}]</code> immediately triggered live search. The model returned current results on the same query.',
+        '<strong>Source URLs are in item.action.sources, not in annotations.</strong> After getting native search working, sources showed as empty. Assumed DashScope would return url_citation annotations like OpenAI. Direct Python inspection of the live API response revealed: (1) message items have annotations=[] (always empty); (2) web_search_call items have an action attribute of type ActionSearch with sources=[ActionSearchSource(type=\'url\', url=\'...\')]. Had to add item.action.sources extraction on the web_search_call items.',
+        '<strong>action.query is always "Web search".</strong> DashScope\'s ActionSearch.query returns the generic string "Web search" for every search call. action.queries is always None. The actual query string used internally is not exposed. We show "(internal)" rather than displaying the meaningless generic label.',
+        '<strong>Standard endpoint only.</strong> The MaaS workspace endpoint used by the Playground does not support the Responses API. Must hardcode the standard dashscope-intl.aliyuncs.com endpoint in _create_client("qwen") for the Comparison tab.',
+        '<strong>enable_thinking disabled via extra_body.</strong> Same as the YDC path — Qwen3.7-max enables thinking by default and the Responses API respects it.',
+        '<strong>⚠ Known gap: inline [N] citations do not map to the sources list.</strong> DashScope does not return <code>url_citation</code> annotations with character offsets (unlike OpenAI). The model generates its own [N] markers inline in its answer text, using its own internal source numbering. Our code independently collects URLs from <code>item.action.sources</code> and numbers them sequentially. These two numbering schemes are never reconciled — so [3] in the answer text does not reliably point to source [3] in the footer. Additionally, if the model internally tracked more sources than DashScope surfaces in action.sources, citation numbers in the text will exceed the sources list count (e.g. [17] appears but only 16 sources listed). <strong>Decision: leave as-is.</strong> There is no DashScope API surface to inject properly mapped citations. Fixing this would require post-hoc URL matching heuristics, which are unreliable.',
+      ],
+      defaults: [
+        ['API', 'client.responses.create()', 'DashScope Responses API. Chat Completions + enable_search does NOT reliably trigger live search for qwen3.7-max — fails silently, returning training data.'],
+        ['Tool declaration', '{"type":"web_search"}', 'Explicit tool registration required. Without this, DashScope Responses API defaults to no search.'],
+        ['enable_thinking', 'False (extra_body)', 'Disabled — same reason as YDC path. Qwen3.7-max enables thinking by default.'],
+        ['Source extraction', 'item.action.sources on web_search_call items', 'DashScope returns source URLs in ActionSearch.sources, NOT in url_citation annotations. Annotations on message items are always empty.'],
+        ['Citation mapping', '⚠ Not available (known gap)', 'DashScope provides no url_citation annotations with offsets. Model-generated [N] in answer text uses its own internal numbering — not mapped to our sources list. Cannot be fixed without unreliable heuristics. Decision: leave as-is.'],
+        ['action.query display', '"(internal)"', 'action.query always returns the generic string "Web search". action.queries is always None. Actual query not exposed by DashScope.'],
+        ['Endpoint', 'dashscope-intl.aliyuncs.com (standard, hardcoded)', 'MaaS workspace endpoint does not support Responses API. Standard public endpoint required for native search.'],
+        ['Agentic loop', 'Single call (DashScope handles internally)', 'DashScope manages multi-round search internally. Client makes one call, receives all output items.'],
+      ],
+      alternatives: [
+        'enable_search via extra_body on Chat Completions may work on some Qwen model versions — not reliable on qwen3.7-max, which requires the Responses API.',
+        'Add search_options={"search_strategy":"agent"} to the extra_body for DashScope to run multi-step autonomous searches.',
+        'qwen3.5-plus or qwen3-max for lower cost — same Responses API pattern applies.',
+      ],
+    },
+  },
+
+  'compare-llama': {
+    title: 'llama-4-maverick',
+    ydc: {
+      file: 'comparison/compare.py → _run_youdotcom_openai()',
+      api: 'OpenAI-compatible Chat Completions · api.together.xyz/v1  +  You.com Search API',
+      summary: 'Llama 4 Maverick uses Together AI\'s OpenAI-compatible endpoint. Same function-calling loop as GPT — finish_reason="tool_calls" triggers You.com search, results appended as tool role message, loop until finish_reason="stop". No native web search capability.',
+      learnings: [
+        '<strong>Together AI uses OpenAI-compatible API.</strong> The same _run_youdotcom_openai() function handles Llama, GPT, Kimi, and Qwen. No model-specific code changes needed — just set provider="openai" and point to api.together.xyz/v1.',
+        '<strong>No native search.</strong> Meta\'s Llama 4 models do not have a built-in web search tool via Together AI. Only the You.com path is available. Native tab shows "not supported" and no judge runs.',
+        '<strong>max_completion_tokens required.</strong> Same as GPT-5+ — max_tokens is ignored on modern Together AI models. Use max_completion_tokens.',
+      ],
+      defaults: [
+        ['Endpoint', 'api.together.xyz/v1', 'Together AI serverless inference. Same OpenAI-compatible API surface as GPT.'],
+        ['Model', 'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8', 'FP8 quantized 128-expert MoE variant via Together AI serverless.'],
+        ['Tool schema', 'TOOL_SCHEMA (OpenAI format)', 'Together AI accepts OpenAI function-calling format.'],
+        ['finish_reason check', 'finish_reason == "tool_calls"', 'Same OpenAI-compatible convention.'],
+        ['Max tokens param', 'max_completion_tokens=4096', 'max_tokens ignored on modern Together AI models.'],
+        ['Native search', 'Not available', 'Llama 4 Maverick has no built-in web search via Together AI. Comparison shows YDC path only.'],
+        ['Judge', 'Skipped', 'Judge requires two answers to compare. Skipped when native search is unavailable.'],
+        ['Cost', '$0.27/$0.85 per 1M tokens', 'Serverless rate. Significantly cheaper than all other comparison models.'],
+      ],
+      alternatives: [
+        'Llama 4 Scout (smaller, faster) via Together AI if available.',
+        'Add a You.com search count baseline comparison: run Llama + YDC vs. another model + YDC to benchmark answer quality without native search.',
+      ],
+    },
+    native: {
+      file: 'N/A',
+      api: 'Not available',
+      summary: 'Llama 4 Maverick does not have native web search capability via Together AI. The comparison for this model shows You.com Search path only.',
+      learnings: [
+        '<strong>No native search tool available.</strong> Together AI does not expose a web_search builtin for Llama 4 models. Meta has not released a native search integration for the Llama 4 series at the time of writing.',
+      ],
+      defaults: [
+        ['Native search', 'Not supported', 'native_search_tool is null in pricing.json. compare.py returns not_supported=True immediately.'],
+      ],
+      alternatives: [
+        'Monitor Together AI and Meta announcements for future native search support.',
+      ],
+    },
+  },
+
+  'ydc-research': {
+    title: 'You.com Research API',
+    file: 'comparison/ydc_research_runner.py → run_ydc_research()',
+    api: 'POST api.you.com/v1/research',
+    summary: 'A single API call — You.com handles multi-step search and synthesis internally. No LLM client needed; You.com selects sources, runs searches, and returns a markdown answer with citations.',
+    defaults: [
+      ['research_effort', 'deep', 'Options: lite / standard / deep / exhaustive. Deep runs multiple search rounds for thorough coverage. Lite is faster but shallower.'],
+      ['Timeout', '180s (3 min)', 'Deep effort can take 60–120s. 180s gives headroom for slow queries.'],
+      ['Cost', '$0.05/call (est.)', 'Bundled pricing — search + synthesis in one flat fee. Actual rate: verify at you.com/platform/pricing.'],
+      ['Token counts', 'Not available', 'API does not return token usage. Output tokens estimated as len(answer) ÷ 4. Input tokens are unknowable.'],
+    ],
+    alternatives: [
+      'Use research_effort="standard" to cut latency by ~50% with slightly less depth.',
+      'Use research_effort="exhaustive" for maximum thoroughness (slower, same price).',
+      'The lite tier is suitable for simple factual queries.',
+    ],
+  },
+
+  'perplexity-sac': {
+    title: 'Perplexity Search as Code (SaC) + Claude',
+    file: 'comparison/perplexity_runner.py → run_perplexity_sac()',
+    api: 'POST api.perplexity.ai/v1/agent  (SSE streaming)',
+    summary: 'Perplexity\'s Agent API is BYOLLM — you supply the model, Perplexity provides the search infrastructure. Claude drives tool calls (web_search, fetch_url) and the response streams as named SSE events, giving live visibility into each search round.',
+    defaults: [
+      ['Model', 'anthropic/claude-sonnet-4-6', 'BYOLLM: Perplexity lets you pick any supported frontier model. Claude chosen for quality consistency with the You.com comparison side.'],
+      ['Tools', 'web_search + fetch_url', 'web_search retrieves search results; fetch_url fetches full page content. Both declared so Claude can choose which to use.'],
+      ['max_output_tokens', '4096', 'Required for Anthropic models — Perplexity returns HTTP 400 without it.'],
+      ['stream', 'True', 'Enables named SSE events (response.reasoning.search_queries, response.output_text.delta, etc.) for live progress display.'],
+      ['Cost reporting', 'usage.cost (dict)', 'Perplexity returns cost as {"total_cost": X, "input_cost": Y, "output_cost": Z} — not a flat number.'],
+    ],
+    alternatives: [
+      'Swap to "openai/gpt-5.4" or "google/gemini-2.5-pro" as the BYOLLM model.',
+      'Omit fetch_url to prevent Claude from fetching full page content (faster, lower cost).',
+      'Set stream=False for simpler response handling (loses live progress events).',
+    ],
+  },
+
+};
+
+function renderInfoPanel(panel) {
+  const rows = (panel.defaults || []).map(([s, v, w]) =>
+    `<tr><td>${s}</td><td><code style="font-size:11px">${v}</code></td><td>${w}</td></tr>`
+  ).join('');
+  const alts = (panel.alternatives || []).map(a => `<li>${a}</li>`).join('');
+  const learns = (panel.learnings || []).map(l => `<li>${l}</li>`).join('');
+  return `
+    <span class="info-file">${panel.file}</span>
+    <div class="info-api">📡 ${panel.api}</div>
+    <p style="font-size:12px;color:#6b6560;margin:0 0 10px;line-height:1.6">${panel.summary}</p>
+    ${learns ? `<h4>What We Tried &amp; Learnings</h4><ul class="info-alts" style="background:#fdf8ee;border-left:3px solid #c4943a;padding:8px 12px 8px 28px;margin:0 0 10px;border-radius:0 4px 4px 0">${learns}</ul>` : ''}
+    <h4>Defaults &amp; Decisions</h4>
+    <table>
+      <thead><tr><th>Setting</th><th>Value</th><th>Why</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${alts ? `<h4>Alternatives &amp; Tuning</h4><ul class="info-alts">${alts}</ul>` : ''}
+  `;
+}
+
+function showCompareInfo(defaultTab, modelKey) {
+  const provider = modelKey || (document.getElementById('cProvider') ? document.getElementById('cProvider').value : 'claude');
+  const info = CODE_INFO['compare-' + provider];
+  if (!info) return showCodeInfoGeneric('compare-' + provider);
+
+  const ydcActive = defaultTab === 'ydc' ? 'active' : '';
+  const nativeActive = defaultTab === 'native' ? 'active' : '';
+
+  document.getElementById('codeInfoContent').innerHTML = `
+    <h3>${info.title} · Integration Details</h3>
+    <div class="info-tabs">
+      <button class="info-tab ${ydcActive}" onclick="switchInfoTab('ydc')">You.com Path</button>
+      <button class="info-tab ${nativeActive}" onclick="switchInfoTab('native')">Native Search Path</button>
+    </div>
+    <div class="info-tab-panel ${ydcActive}" id="infoTabYdc">${renderInfoPanel(info.ydc)}</div>
+    <div class="info-tab-panel ${nativeActive}" id="infoTabNative">${renderInfoPanel(info.native)}</div>
+  `;
+  document.getElementById('codeInfoOverlay').classList.add('visible');
+}
+
+function switchInfoTab(tab) {
+  const tabs = document.querySelectorAll('#codeInfoModal .info-tab');
+  const panels = document.querySelectorAll('#codeInfoModal .info-tab-panel');
+  const order = ['ydc', 'native'];
+  tabs.forEach((t, i) => t.classList.toggle('active', order[i] === tab));
+  panels.forEach((p, i) => p.classList.toggle('active', order[i] === tab));
+}
+
+function showCodeInfo(key) {
+  const info = CODE_INFO[key];
+  if (!info) return showCodeInfoGeneric(key);
+
+  const rows = (info.defaults || []).map(([s, v, w]) =>
+    `<tr><td>${s}</td><td>${v}</td><td>${w}</td></tr>`
+  ).join('');
+  const alts = (info.alternatives || []).map(a => `<li>${a}</li>`).join('');
+
+  document.getElementById('codeInfoContent').innerHTML = `
+    <h3>${info.title}</h3>
+    <span class="info-file">${info.file}</span>
+    <div class="info-api">📡 ${info.api}</div>
+    <p style="font-size:12px;color:#6b6560;margin:0 0 4px;line-height:1.6">${info.summary}</p>
+    <h4>Defaults &amp; Decisions</h4>
+    <table>
+      <thead><tr><th>Setting</th><th>Value</th><th>Why</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${alts ? `<h4>Alternatives</h4><ul class="info-alts">${alts}</ul>` : ''}
+  `;
+  document.getElementById('codeInfoOverlay').classList.add('visible');
+  return true;
+}
+
+function showCodeInfoGeneric(key) {
+  document.getElementById('codeInfoContent').innerHTML = `
+    <h3>Code Info</h3>
+    <p style="color:#9a8878;font-size:12px">No info entry found for key: <code>${key}</code></p>`;
+  document.getElementById('codeInfoOverlay').classList.add('visible');
+}
+
+function hideCodeInfo() {
+  document.getElementById('codeInfoOverlay').classList.remove('visible');
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') hideCodeInfo();
+});
+</script>
+
+<datalist id="sampleQueries"></datalist>
+</body>
+</html>
