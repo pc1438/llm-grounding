@@ -39,6 +39,9 @@ comparison/ab_*_results*.json
 comparison/ab_claude_prompt_results.json
 GPT\ comparison/results_*.json
 
+# GPT comparison — standalone prototype, superseded by comparison/ and app/
+GPT\ comparison/
+
 # Article / documentation directory — drafts, PDFs, docx, diagrams
 # These are not part of the runnable codebase
 article/
