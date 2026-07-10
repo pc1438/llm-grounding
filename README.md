@@ -160,6 +160,23 @@ The codebase is layered: CLI modules are standalone and importable; the UI is a 
 
 **Agent caching:** `agent_pool.py` maintains a shared, thread-safe cache of agent instances. Both `run.py` and `compare.py` pull from this pool — avoiding duplicate instantiation and TCP/TLS handshake overhead across parallel requests. The server pre-warms all agents at startup.
 
+## Deploying
+
+The dev server (`python server.py`) is fine for local use. For a shared or internet-facing deployment:
+
+```bash
+# Bind to localhost and put a reverse proxy in front
+python server.py --port 8080
+```
+
+**Recommended setup:**
+- **Reverse proxy:** nginx or Caddy in front — handles TLS termination and auth
+- **Origin restriction:** set `ALLOWED_ORIGIN` in `server.py` to your domain (currently `http://localhost:8080`)
+- **Auth:** add HTTP basic auth or SSO at the proxy layer — the app has no built-in auth
+- **Process management:** run under `systemd` or `supervisord` so it restarts on crash
+
+The server uses Python's built-in `http.server` with threading — adequate for small teams, not production-scale traffic.
+
 ## Search Cost Reference
 
 | Provider | Per 1,000 searches | Notes |
