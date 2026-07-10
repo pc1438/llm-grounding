@@ -19,15 +19,15 @@ The CLI modules work standalone — this server just wraps them for the UI.
 
 import json
 import logging
+import logging.handlers
 import os
 import sys
 import threading
+import time
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from pathlib import Path
 from dotenv import load_dotenv
-
-logger = logging.getLogger(__name__)
 
 # ─── Path setup ────────────────────────────────────────────────────────────
 # This file lives in use-cases/app/. We need to reach:
@@ -38,12 +38,35 @@ APP_DIR = Path(__file__).parent
 USE_CASES_DIR = APP_DIR.parent
 GROUNDING_DIR = USE_CASES_DIR / "grounding"
 COMPARISON_DIR = USE_CASES_DIR / "comparison"
+LOG_DIR = USE_CASES_DIR / "logs"
+LOG_DIR.mkdir(exist_ok=True)
 
-# Load env from grounding dir (that's where env.txt lives)
+# Load env first so LOG_LEVEL and API keys are available before anything else
 load_dotenv(GROUNDING_DIR / "env.txt")
 load_dotenv(GROUNDING_DIR / ".env")
 load_dotenv(COMPARISON_DIR / "env.txt")
 load_dotenv(COMPARISON_DIR / ".env")
+
+# ─── Logging ───────────────────────────────────────────────────────────────
+# Control verbosity with LOG_LEVEL in env.txt:
+#   DEBUG   — full request/response detail, useful during development
+#   INFO    — normal operational messages (default)
+#   WARNING — only unexpected conditions
+#   ERROR   — only failures; recommended for production / check-in
+_log_level = getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO)
+_fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s", datefmt="%H:%M:%S")
+_file_handler = logging.handlers.RotatingFileHandler(
+    LOG_DIR / "server.log", maxBytes=10_000_000, backupCount=3, encoding="utf-8"
+)
+_file_handler.setFormatter(_fmt)
+_stderr_handler = logging.StreamHandler()
+_stderr_handler.setFormatter(_fmt)
+logging.basicConfig(level=_log_level, handlers=[_stderr_handler, _file_handler])
+
+logger = logging.getLogger(__name__)
+logger.info("=" * 60)
+logger.info("SERVER START (level=%s)", logging.getLevelName(_log_level))
+logger.info("=" * 60)
 
 # Add both dirs to path so imports work
 sys.path.insert(0, str(GROUNDING_DIR))
@@ -51,20 +74,32 @@ sys.path.insert(0, str(COMPARISON_DIR))
 
 # Import from grounding/run.py
 from run import GROUNDING_MODELS, run_grounding
+from search_tool import MAX_TOOL_ROUNDS, MAX_TOKENS, SYSTEM_PROMPT, _GPT_55_SEARCH_RULES
 
 # Import from comparison/compare.py
 from compare import (
     MODELS,
-    run_youdotcom, run_native, run_judge, _create_client,
+    run_youdotcom, run_native,
     describe_native_search,
-    calculate_costs, calculate_native_costs,
+    calculate_costs,
 )
 
-# Import from comparison/perplexity_runner.py
-from perplexity_runner import PERPLEXITY_SAC_CONFIG, run_perplexity_sac
+# Load pricing.json directly — same source of truth compare.py uses, no cross-module dependency
+_PRICING_FILE = Path(__file__).parent.parent / "comparison" / "pricing.json"
+try:
+    with open(_PRICING_FILE) as _f:
+        _PRICING_DATA = json.load(_f)
+except Exception as _e:
+    logging.error("Failed to load pricing.json: %s", _e)
+    _PRICING_DATA = {"models": {}}
 
-# Import from comparison/ydc_research_runner.py
-from ydc_research_runner import YDC_RESEARCH_CONFIG, run_ydc_research
+PLAYGROUND_MODELS = {k: v for k, v in _PRICING_DATA.get("models", {}).items() if v.get("in_playground")}
+from judge import run_judge
+from agent_pool import prewarm as _prewarm_agents
+
+# Pre-warm all agents in the main thread before any parallel requests arrive.
+# Prevents threading deadlocks caused by lazy module initialization races.
+_prewarm_agents(_PRICING_DATA.get("models", {}))
 
 
 # ─── Request handler ───────────────────────────────────────────────────────
@@ -109,6 +144,15 @@ class AppHandler(SimpleHTTPRequestHandler):
         elif self.path == "/api/pricing":
             pricing_file = Path(__file__).parent.parent / "comparison" / "pricing.json"
             self._serve_json_file(pricing_file)
+        elif self.path == "/api/config":
+            self._send_json(200, {
+                "max_tool_rounds": MAX_TOOL_ROUNDS,
+                "max_tokens": MAX_TOKENS,
+                "system_prompt": SYSTEM_PROMPT,
+                "prompt_overrides": {
+                    "gpt-5.5": _GPT_55_SEARCH_RULES,
+                },
+            })
         elif self.path == "/api/questions":
             questions_file = Path(__file__).parent.parent / "comparison" / "benchmark_questions_50.json"
             self._serve_json_file(questions_file)
@@ -122,8 +166,6 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._handle_compare()
         elif self.path == "/api/multi-compare":
             self._handle_multi_compare()
-        elif self.path == "/api/sac-compare":
-            self._handle_sac_compare()
         elif self.path == "/api/models":
             self._handle_models()
         else:
@@ -257,11 +299,36 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._send_json(500, {"error": "YDC_API_KEY not configured"})
             return
 
+        model_config = PLAYGROUND_MODELS.get(model_key, {})
         self._start_sse()
 
-        # Stream events from the grounding generator
+        t_start = time.perf_counter()
+        first_ms = None
+
         for event in run_grounding(model_key, query):
-            self._send_sse(event["event"], event)
+            etype = event["event"]
+
+            if first_ms is None and etype not in ("init",):
+                first_ms = round((time.perf_counter() - t_start) * 1000)
+
+            if etype == "done":
+                stats = event.get("stats", {})
+                overhead_ms = round((time.perf_counter() - t_start) * 1000 - stats.get("latency_ms", 0))
+                costs = calculate_costs(stats, model_config)
+                event = dict(event,
+                    overhead_ms=max(0, overhead_ms),
+                    first_ms=first_ms or 0,
+                    cost=round(costs["llm"] + costs["search"], 6),
+                    cost_llm=round(costs["llm"], 6),
+                    cost_search=round(costs["search"], 6),
+                    pricing={
+                        "input_cost_per_m": model_config["input_cost_per_m"],
+                        "output_cost_per_m": model_config["output_cost_per_m"],
+                        "ydc_search_per_1k": model_config["ydc_search_cost_per_call"] * 1000,
+                    },
+                )
+
+            self._send_sse(etype, event)
 
     # ── /api/compare ───────────────────────────────────────────────────────
 
@@ -296,13 +363,6 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._send_json(500, {"error": "YDC_API_KEY not configured"})
             return
 
-        try:
-            client = _create_client(model_config)
-        except ValueError as e:
-            logger.error("_create_client failed for provider %s: %s", provider, e)
-            self._send_json(500, {"error": "Server configuration error. Check API keys."})
-            return
-
         self._start_sse()
 
         # ── Steps 1 & 2: Run You.com and Native paths in parallel ──
@@ -311,21 +371,34 @@ class AppHandler(SimpleHTTPRequestHandler):
         send_sse_safe("status", {"step": "both", "message": "Running You.com + Native paths in parallel..."})
 
         # Shared results — each thread writes to its slot
-        ydc_result = {"stats": None, "error": None}
-        native_result = {"stats": None, "error": None}
+        ydc_result = {"stats": None, "error": None, "thread_ms": None, "first_ms": None}
+        native_result = {"stats": None, "error": None, "thread_ms": None, "first_ms": None}
+
+        t_threads_start = time.perf_counter()
+
+        def make_progress_fn(result_dict, path):
+            def fn(msg):
+                if result_dict["first_ms"] is None:
+                    result_dict["first_ms"] = round((time.perf_counter() - t_threads_start) * 1000)
+                send_sse_safe("progress", {"path": path, "message": msg})
+            return fn
 
         def run_ydc_thread():
+            t0 = time.perf_counter()
             try:
-                ydc_result["stats"] = run_youdotcom(query, client, model_config,
-                    on_progress=lambda msg: send_sse_safe("progress", {"path": "youdotcom", "message": msg}))
+                ydc_result["stats"] = run_youdotcom(query, model_config,
+                    on_progress=make_progress_fn(ydc_result, "ydc"))
+                ydc_result["thread_ms"] = (time.perf_counter() - t0) * 1000
             except Exception as e:
                 logger.error("You.com path failed: %s", e, exc_info=True)
                 ydc_result["error"] = True
 
         def run_native_thread():
+            t0 = time.perf_counter()
             try:
-                native_result["stats"] = run_native(query, client, model_config,
-                    on_progress=lambda msg: send_sse_safe("progress", {"path": "native", "message": msg}))
+                native_result["stats"] = run_native(query, model_config,
+                    on_progress=make_progress_fn(native_result, "native"))
+                native_result["thread_ms"] = (time.perf_counter() - t0) * 1000
             except Exception as e:
                 logger.error("Native path failed: %s", e, exc_info=True)
                 native_result["error"] = True
@@ -343,20 +416,30 @@ class AppHandler(SimpleHTTPRequestHandler):
             return
 
         ydc_stats = ydc_result["stats"]
+        tb = ydc_stats["token_breakdown"]
+        _ydc_overhead = ydc_result.get("thread_ms", ydc_stats["latency_ms"]) - ydc_stats["latency_ms"]
+        logger.info("[compare/ydc] tokens=%d in=%d out=%d ctx=%d searches=%d api_calls=%d latency=%.0fms connect=%.0fms overhead=%.0fms",
+            ydc_stats["tokens_used"], tb["input"], tb["output"], tb["search_context"],
+            ydc_stats["search_calls"], ydc_stats["api_calls"], ydc_stats["latency_ms"],
+            ydc_stats.get("connect_ms", 0), _ydc_overhead)
         _ydc = calculate_costs(ydc_stats, model_config)
         ydc_llm, ydc_search, ydc_cost = _ydc["llm"], _ydc["search"], _ydc["total"]
+        logger.info("[compare/ydc] cost=llm:$%.6f search:$%.6f total:$%.6f", ydc_llm, ydc_search, ydc_cost)
 
-        send_sse_safe("youdotcom", {
+        send_sse_safe("ydc", {
             "answer": ydc_stats["answer"],
-            "total_tokens": ydc_stats["total_tokens"],
-            "input_tokens": ydc_stats["input_tokens"],
-            "output_tokens": ydc_stats["output_tokens"],
-            "search_context_tokens": ydc_stats["search_context_tokens"],
+            "total_tokens": ydc_stats["tokens_used"],
+            "input_tokens": ydc_stats["token_breakdown"]["input"],
+            "output_tokens": ydc_stats["token_breakdown"]["output"],
+            "search_context_tokens": ydc_stats["token_breakdown"]["search_context"],
             "api_calls": ydc_stats["api_calls"],
             "search_calls": ydc_stats["search_calls"],
             "sources": ydc_stats["sources"],
             "search_uuid": ydc_stats.get("search_uuid", ""),
             "latency_ms": round(ydc_stats["latency_ms"]),
+            "connect_ms": ydc_stats.get("connect_ms", 0),
+            "overhead_ms": round(_ydc_overhead),
+            "first_ms": ydc_result.get("first_ms") or 0,
             "cost": round(ydc_cost, 6),
             "cost_llm": round(ydc_llm, 6),
             "cost_search": round(ydc_search, 6),
@@ -373,19 +456,29 @@ class AppHandler(SimpleHTTPRequestHandler):
             send_sse_safe("native_unavailable", {"message": "Native web search is not supported for this model."})
             return
 
-        _native = calculate_native_costs(native_stats, model_config)
+        tb = native_stats["token_breakdown"]
+        _native_overhead = native_result.get("thread_ms", native_stats["latency_ms"]) - native_stats["latency_ms"]
+        logger.info("[compare/native] tokens=%d in=%d out=%d ctx=%d searches=%d api_calls=%d latency=%.0fms connect=%.0fms overhead=%.0fms",
+            native_stats["tokens_used"], tb["input"], tb["output"], tb["search_context"],
+            native_stats["search_calls"], native_stats["api_calls"], native_stats["latency_ms"],
+            native_stats.get("connect_ms", 0), _native_overhead)
+        _native = calculate_costs(native_stats, model_config, path="native")
         native_llm, native_search, native_cost = _native["llm"], _native["search"], _native["total"]
+        logger.info("[compare/native] cost=llm:$%.6f search:$%.6f total:$%.6f", native_llm, native_search, native_cost)
 
         send_sse_safe("native", {
             "answer": native_stats["answer"],
-            "total_tokens": native_stats["total_tokens"],
-            "input_tokens": native_stats["input_tokens"],
-            "output_tokens": native_stats["output_tokens"],
-            "search_context_tokens": native_stats["search_context_tokens"],
+            "total_tokens": native_stats["tokens_used"],
+            "input_tokens": native_stats["token_breakdown"]["input"],
+            "output_tokens": native_stats["token_breakdown"]["output"],
+            "search_context_tokens": native_stats["token_breakdown"]["search_context"],
             "api_calls": native_stats["api_calls"],
             "search_calls": native_stats["search_calls"],
             "sources": native_stats["sources"],
             "latency_ms": round(native_stats["latency_ms"]),
+            "connect_ms": native_stats.get("connect_ms", 0),
+            "overhead_ms": round(_native_overhead),
+            "first_ms": native_result.get("first_ms") or 0,
             "cost": round(native_cost, 6),
             "cost_llm": round(native_llm, 6),
             "cost_search": round(native_search, 6),
@@ -457,8 +550,8 @@ class AppHandler(SimpleHTTPRequestHandler):
         if len(query) > self.MAX_QUERY_LENGTH:
             self._send_json(400, {"error": f"Query too long (max {self.MAX_QUERY_LENGTH} chars)"})
             return
-        if not providers or not (2 <= len(providers) <= 3):
-            self._send_json(400, {"error": "Provide 2-3 model providers"})
+        if not providers or not (2 <= len(providers) <= 5):
+            self._send_json(400, {"error": "Provide 2-5 model providers"})
             return
         for p in providers:
             if p not in MODELS:
@@ -470,28 +563,24 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._send_json(500, {"error": "YDC_API_KEY not configured"})
             return
 
-        # Validate all clients upfront before starting SSE
-        clients = {}
-        for p in providers:
-            try:
-                clients[p] = _create_client(MODELS[p])
-            except ValueError as e:
-                logger.error("_create_client failed for provider %s: %s", p, e)
-                self._send_json(500, {"error": "Server configuration error. Check API keys."})
-                return
-
         self._start_sse()
 
         send_sse_safe = self._make_sse_sender()
 
         def run_slot(slot, provider):
+            t_slot = time.perf_counter()
+            _first_ms = [None]
             model_config = MODELS[provider]
-            client = clients[provider]
+            def _on_progress(msg):
+                if _first_ms[0] is None:
+                    _first_ms[0] = round((time.perf_counter() - t_slot) * 1000)
+                send_sse_safe("model_progress", {"slot": slot, "message": msg})
             try:
-                stats = run_youdotcom(
-                    query, client, model_config,
-                    on_progress=lambda msg: send_sse_safe("model_progress", {"slot": slot, "message": msg})
-                )
+                stats = run_youdotcom(query, model_config, on_progress=_on_progress)
+                _slot_overhead = (time.perf_counter() - t_slot) * 1000 - stats["latency_ms"]
+                logger.info("[multi/ydc] provider=%s searches=%d api_calls=%d latency=%.0fms connect=%.0fms overhead=%.0fms",
+                    provider, stats["search_calls"], stats["api_calls"], stats["latency_ms"],
+                    stats.get("connect_ms", 0), _slot_overhead)
                 _costs = calculate_costs(stats, model_config)
                 llm_cost, search_cost = _costs["llm"], _costs["search"]
                 send_sse_safe("model_result", {
@@ -499,14 +588,17 @@ class AppHandler(SimpleHTTPRequestHandler):
                     "provider": provider,
                     "display_name": model_config["display_name"],
                     "answer": stats["answer"],
-                    "total_tokens": stats["total_tokens"],
-                    "input_tokens": stats["input_tokens"],
-                    "output_tokens": stats["output_tokens"],
-                    "search_context_tokens": stats["search_context_tokens"],
+                    "total_tokens": stats["tokens_used"],
+                    "input_tokens": stats["token_breakdown"]["input"],
+                    "output_tokens": stats["token_breakdown"]["output"],
+                    "search_context_tokens": stats["token_breakdown"]["search_context"],
                     "api_calls": stats["api_calls"],
                     "search_calls": stats["search_calls"],
                     "sources": stats["sources"],
                     "latency_ms": round(stats["latency_ms"]),
+                    "connect_ms": stats.get("connect_ms", 0),
+                    "overhead_ms": round(max(0, _slot_overhead)),
+                    "first_ms": _first_ms[0] or 0,
                     "cost": round(llm_cost + search_cost, 6),
                     "cost_llm": round(llm_cost, 6),
                     "cost_search": round(search_cost, 6),
@@ -528,171 +620,6 @@ class AppHandler(SimpleHTTPRequestHandler):
 
         send_sse_safe("done", {"query": query})
 
-    # ── /api/sac-compare ───────────────────────────────────────────────────
-
-    def _handle_sac_compare(self):
-        """Stream You.com Research API vs. Perplexity SaC comparison events as SSE.
-
-        Both sides are single-call deep research APIs:
-          - You.com Research API: one POST, multi-step search + synthesis internally
-          - Perplexity SaC: Claude inside Perplexity's Agent API with SaC SDK primitives
-
-        GPT acts as a cross-model judge to evaluate both answers.
-        """
-        params = self._read_json_body()
-        if params is None:
-            return
-
-        query = params.get("query", "").strip()
-        skip_judge = params.get("skip_judge", False)
-
-        if not query:
-            self._send_json(400, {"error": "Query is required"})
-            return
-        if len(query) > self.MAX_QUERY_LENGTH:
-            self._send_json(400, {"error": f"Query too long (max {self.MAX_QUERY_LENGTH} chars)"})
-            return
-
-        ydc_key = os.environ.get("YDC_API_KEY", "")
-        if not ydc_key:
-            self._send_json(500, {"error": "YDC_API_KEY not configured"})
-            return
-
-        plx_key = os.environ.get("PERPLEXITY_API_KEY", "")
-        if not plx_key:
-            self._send_json(500, {"error": "PERPLEXITY_API_KEY not configured"})
-            return
-
-        self._start_sse()
-
-        send_sse_safe = self._make_sse_sender()
-
-        send_sse_safe("status", {"step": "youdotcom", "message": "Running You.com Research API..."})
-        send_sse_safe("status", {"step": "perplexity", "message": "Running Claude + Perplexity SaC..."})
-
-        ydc_result = {"stats": None, "error": None}
-        plx_result = {"stats": None, "error": None}
-
-        def run_ydc_thread():
-            try:
-                ydc_result["stats"] = run_ydc_research(
-                    query, ydc_key,
-                    research_effort=YDC_RESEARCH_CONFIG["effort"],
-                    on_progress=lambda msg: send_sse_safe("progress", {"path": "youdotcom", "message": msg}),
-                )
-            except Exception as e:
-                logger.error("You.com Research path failed: %s", e, exc_info=True)
-                ydc_result["error"] = True
-
-        def run_plx_thread():
-            try:
-                plx_result["stats"] = run_perplexity_sac(
-                    query, plx_key,
-                    on_progress=lambda msg: send_sse_safe("progress", {"path": "perplexity", "message": msg}),
-                )
-            except Exception as e:
-                logger.error("Perplexity SaC path failed: %s", e, exc_info=True)
-                plx_result["error"] = True
-
-        t_ydc = threading.Thread(target=run_ydc_thread)
-        t_plx = threading.Thread(target=run_plx_thread)
-        t_ydc.start()
-        t_plx.start()
-        t_ydc.join()
-        t_plx.join()
-
-        # ── Emit You.com Research result ──
-        if ydc_result["error"]:
-            send_sse_safe("error", {"message": "You.com Research failed. Please try again."})
-            return
-
-        ydc_stats = ydc_result["stats"]
-        if ydc_stats is None:
-            send_sse_safe("error", {"message": "You.com Research returned no data. Please try again."})
-            return
-        # Research API bundles all costs; token counts are not exposed
-        ydc_cost = YDC_RESEARCH_CONFIG["cost_per_call"]
-
-        send_sse_safe("youdotcom", {
-            "answer": ydc_stats["answer"],
-            "total_tokens": ydc_stats["total_tokens"],
-            "input_tokens": ydc_stats["input_tokens"],
-            "output_tokens": ydc_stats["output_tokens"],
-            "search_context_tokens": 0,
-            "tokens_estimated": True,
-            "api_calls": ydc_stats["api_calls"],
-            "search_calls": ydc_stats["search_calls"],
-            "sources": ydc_stats["sources"],
-            "latency_ms": round(ydc_stats["latency_ms"]),
-            "cost": round(ydc_cost, 6),
-            "cost_llm": 0.0,
-            "cost_search": round(ydc_cost, 6),
-            "cost_note": "est.",
-            "research_effort": ydc_stats.get("research_effort", YDC_RESEARCH_CONFIG["effort"]),
-        })
-
-        # ── Emit Perplexity result ──
-        if plx_result["error"]:
-            send_sse_safe("error", {"message": "Perplexity search failed. Please try again."})
-            return
-
-        plx_stats = plx_result["stats"]
-        # Use actual cost from Perplexity's usage object if available; otherwise estimate
-        if plx_stats.get("actual_cost") is not None:
-            plx_cost = plx_stats["actual_cost"]
-            plx_cost_note = "actual"
-        else:
-            plx_cost = plx_stats["api_calls"] * PERPLEXITY_SAC_CONFIG["sac_cost_per_call"]
-            plx_cost_note = "est."
-
-        send_sse_safe("perplexity", {
-            "answer": plx_stats["answer"],
-            "total_tokens": plx_stats["total_tokens"],
-            "input_tokens": plx_stats["input_tokens"],
-            "output_tokens": plx_stats["output_tokens"],
-            "search_context_tokens": plx_stats.get("search_context_tokens", 0),
-            "api_calls": plx_stats["api_calls"],
-            "search_calls": plx_stats["search_calls"],
-            "sandbox_executions": plx_stats.get("sandbox_executions", 0),
-            "sources": plx_stats["sources"],
-            "latency_ms": round(plx_stats["latency_ms"]),
-            "cost": round(plx_cost, 6),
-            "cost_llm": 0.0,      # Claude inference bundled into Perplexity's billing
-            "cost_search": round(plx_cost, 6),
-            "cost_note": plx_cost_note,
-        })
-
-        # ── Judge (GPT judges since neither side exposes a local LLM cleanly) ──
-        judge_result = None
-        if not skip_judge:
-            send_sse_safe("status", {"step": "judge", "message": "Running judge evaluation (GPT-5.4)..."})
-            try:
-                judge_result = run_judge(
-                    query,
-                    ydc_stats["answer"],
-                    plx_stats["answer"],
-                    "openai",
-                    sources_ydc=ydc_stats["sources"],
-                    sources_native=plx_stats["sources"],
-                )
-            except Exception as e:
-                logger.error("Judge failed (sac-compare): %s", e, exc_info=True)
-                judge_result = {"error": "Judge evaluation failed. Please try again."}
-
-            send_sse_safe("judge", judge_result)
-
-        # ── Done ──
-        send_sse_safe("done", {
-            "query": query,
-            "pricing": {
-                "ydc_research_effort": YDC_RESEARCH_CONFIG["effort"],
-                "ydc_research_per_call": YDC_RESEARCH_CONFIG["cost_per_call"],
-                "ydc_research_note": "est. — You.com Research API bundles search + synthesis; verify at you.com/platform/pricing",
-                "plx_sac_per_call": PERPLEXITY_SAC_CONFIG["sac_cost_per_call"],
-                "plx_sac_note": "est. — Perplexity Agent API (Claude + SaC SDK); includes Claude inference; verify at docs.perplexity.ai",
-            },
-        })
-
     def do_OPTIONS(self):
         """Handle CORS preflight."""
         self.send_response(200)
@@ -702,8 +629,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         self.end_headers()
 
     def log_message(self, format, *args):
-        """Cleaner logging."""
-        sys.stderr.write(f"[server] {args[0]}\n")
+        logger.info("[http] %s %s", self.client_address[0], (format % args))
 
 
 # ─── Main ──────────────────────────────────────────────────────────────────

@@ -52,6 +52,9 @@ class LlamaAgent(OpenAICompatibleAgent):
 
     Uses OpenAI-compatible function calling via Together AI or Ollama.
     Always uses chat.completions — Together AI and Ollama don't support Responses API.
+
+    Return value of ask() and run_native_search(): see base_agent._empty_stats()
+    for the full field-by-field reference.
     """
 
     def __init__(
@@ -78,7 +81,7 @@ class LlamaAgent(OpenAICompatibleAgent):
                     f"Pass api_key= or export {cfg['api_key_env']}."
                 )
 
-        client = OpenAI(api_key=resolved_key, base_url=cfg["base_url"])
+        client = OpenAI(api_key=resolved_key, base_url=cfg["base_url"], timeout=120.0)
         model = model or cfg["default_model"]
         super().__init__(client=client, model=model)
 

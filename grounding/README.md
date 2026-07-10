@@ -1,6 +1,6 @@
 # LLM Grounding with You.com Web Search API
 
-Reduce LLM hallucinations by giving your AI agent access to real-time web search. The agent decides when to search. You.com handles the retrieval. This repo provides a modular, class-based Python library that works with Claude, GPT-5.4, Qwen, Kimi, and Llama.
+Reduce LLM hallucinations by giving your AI agent access to real-time web search. The agent decides when to search. You.com handles the retrieval. This repo provides a modular, class-based Python library that works with Claude, GPT-5.4/5.5, Qwen, Kimi, Llama, DeepSeek, GLM-5, and more — any model routable via OpenRouter.
 
 **What this is:** Importable Python classes you bring into your own project. Not a standalone app, not a notebook, not a REST service. You `from agents.claude_agent import ClaudeAgent` in your Flask backend, data pipeline, CLI tool, or wherever you need grounded LLM responses. The agents handle the tool-use loop internally. Your code just calls `agent.ask(question)` and gets back a grounded, cited answer.
 
@@ -92,7 +92,7 @@ print(result["sources"])     # URLs the agent used
 print(result["tool_calls"])  # what it searched for
 ```
 
-That's the core pattern. Import an agent, call `agent.ask()`, get a grounded answer. Works the same for all five LLMs:
+That's the core pattern. Import an agent, call `agent.ask()`, get a grounded answer. Works the same across all supported providers:
 
 ```python
 from agents.openai_agent import OpenAIAgent        # GPT-5.4
@@ -151,7 +151,7 @@ See **Integration Patterns** below for a comparison of when to use which path.
 
 ## Unified CLI: run.py
 
-`run.py` is the single entry point for running any grounded LLM with full trace output. It supports all five providers, shows the complete tool-use loop, and reports token/cost breakdowns.
+`run.py` is the single entry point for running any grounded LLM with full trace output. It supports all providers in `pricing.json`, shows the complete tool-use loop, and reports token/cost breakdowns.
 
 ```bash
 python run.py claude "What happened in tech news today?"
@@ -179,20 +179,21 @@ Events: `init` → `tool_call` → `search_result` → `answer` → `done` (or `
 
 ```
 grounding/
-├── run.py                     # Unified CLI + generator API for all 5 LLMs
+├── run.py                     # Unified CLI + generator API for all supported models
+├── agent_pool.py              # Shared thread-safe agent cache (used by UI server)
 ├── search_tool.py             # Tool definition + You.com search execution
 ├── base_agent.py              # Base classes: tool-use loop for all providers
 ├── agents/
 │   ├── __init__.py
 │   ├── claude_agent.py        # Claude (Anthropic tool_use format)
-│   ├── openai_agent.py        # GPT-5.4 (OpenAI function calling)
-│   ├── qwen_agent.py          # Qwen (DashScope / Hugging Face)
-│   ├── kimi_agent.py          # Kimi K2.5 (Moonshot)
+│   ├── openai_agent.py        # GPT-5.4/5.5 (OpenAI function calling)
+│   ├── qwen_agent.py          # Qwen (DashScope)
+│   ├── kimi_agent.py          # Kimi K2.6 (Moonshot)
+│   ├── openrouter_agent.py    # Llama, DeepSeek, GLM-5, and any OpenRouter model
 │   └── llama_agent.py         # Llama 4 (Together AI / Ollama)
 ├── demo.py                    # Interactive demo — Direct API path (any LLM)
 ├── langchain_agent.py         # LangChain path — ReAct, multi-tool, RAG
 ├── mcp_demo.py                # MCP path — Python client for You.com MCP server
-├── mcp_config.json            # MCP config — copy-paste for IDE setup
 ├── skill_youdotcom_search.md  # Agent Skills path — .md file for agent runtimes
 ├── requirements.txt
 ├── .env.example

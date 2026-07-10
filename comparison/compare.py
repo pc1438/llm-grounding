@@ -39,11 +39,7 @@ QWEN ENDPOINT NOTE:
 
 import json
 import os
-import random
-import re
 import sys
-import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -55,27 +51,15 @@ load_dotenv(Path(__file__).parent.parent / "grounding" / ".env")
 # Add grounding/ to path so we can import from it
 sys.path.insert(0, str(Path(__file__).parent.parent / "grounding"))
 
-from anthropic import Anthropic
-from openai import OpenAI
+from judge import run_judge
 
 from search_tool import (
-    get_system_prompt,  # Runtime prompt with current date/time
-    MAX_TOKENS,         # Canonical constant — defined in search_tool.py
-    MAX_TOOL_ROUNDS,    # Canonical constant — defined in search_tool.py
-    TOOL_SCHEMA,
-    TOOL_SCHEMA_ANTHROPIC,
-    TOOL_SCHEMA_RESPONSES,
-    execute_search,
-    extract_urls,
-    extract_search_uuid,
     is_verbose,
-    set_interface,
 )
-from base_agent import AnthropicAgent, OpenAICompatibleAgent, OpenAIResponsesAgent
-from agents.claude_agent import ClaudeAgent
-from agents.openai_agent import OpenAIAgent
-from agents.kimi_agent import KimiAgent
-from agents.qwen_agent import QwenAgent
+from agent_pool import get_agent as _get_agent_pool
+
+def _get_agent(provider: str, model_id: str):
+    return _get_agent_pool(provider, model_id)
 
 # ─── Load model config + pricing from single source of truth ──────────────
 # Edit comparison/pricing.json to update rates — this file reads it at startup.
@@ -94,7 +78,6 @@ except Exception as _e:
 # in_comparison: true entries are loaded here; playground-only models are excluded.
 MODELS = {k: v for k, v in _PRICING_DATA.get("models", {}).items() if v.get("in_comparison")}
 
-# SYSTEM_PROMPT and MAX_TOKENS imported from search_tool.py (single source of truth)
 
 
 def describe_native_search(model_config: dict) -> str:
@@ -103,7 +86,9 @@ def describe_native_search(model_config: dict) -> str:
     Reads the config dynamically so CLI output and UI footnotes always
     reflect whatever is set in MODELS.
     """
-    tool = model_config.get("native_search_tool", {})
+    tool = model_config.get("native_search_tool") or {}
+    if not tool:
+        return "not supported"
     tool_type = tool.get("type", "unknown")
 
     # Kimi builtin_function: show the function name
@@ -111,6 +96,13 @@ def describe_native_search(model_config: dict) -> str:
         fn_name = tool.get("name", "unknown")
         return f"builtin_function:{fn_name} (Kimi built-in search)"
 
+    # Qwen web_search: DashScope Responses API built-in (no search_context_size — that's OpenAI)
+    if tool_type == "web_search" and not tool.get("search_context_size"):
+        return "web_search (DashScope built-in, Responses API)"
+
+    # OpenRouter Exa: :online suffix, single-call, Exa search engine
+    if tool_type == "exa_online":
+        return "exa_online (OpenRouter :online suffix — Exa search, single call)"
 
     parts = [tool_type]
 
@@ -132,195 +124,59 @@ def describe_native_search(model_config: dict) -> str:
     return " | ".join(parts)
 
 
-def calculate_costs(stats: dict, model_config: dict) -> dict:
-    """Return {"llm", "search", "livecrawl_overage", "total"} costs in USD for the You.com path.
+def calculate_costs(stats: dict, model_config: dict, path: str = "ydc") -> dict:
+    """Return {"llm", "search", "livecrawl_overage", "total"} costs in USD.
+
+    path: "ydc" (default) — You.com search path (ydc_search_cost_per_call, livecrawl).
+          anything else   — native search path (native_search_cost_per_call, no livecrawl).
 
     Rates come from pricing.json (via model_config) — nothing is hardcoded here.
-    Called by both print_comparison() and server.py so the formula lives once.
+    Called by print_comparison(), server.py, and benchmark_runner.py.
 
-    Livecrawl pricing: first 10 URLs per call are included in the base $5/1k rate;
-    additional URLs are charged at $1/1,000 URLs, billed on the count parameter
-    (URLs requested, not returned).
+    Livecrawl pricing (ydc only): first 10 URLs per call included in base $5/1k rate;
+    additional URLs charged at $1/1,000 URLs, billed on count (requested, not returned).
     """
+    tb = stats.get("token_breakdown", {})
+    input_tokens  = tb.get("input",  stats.get("input_tokens",  0))
+    output_tokens = tb.get("output", stats.get("output_tokens", 0))
     llm = (
-        stats["input_tokens"] * model_config["input_cost_per_m"] / 1_000_000
-        + stats["output_tokens"] * model_config["output_cost_per_m"] / 1_000_000
+        input_tokens  * model_config.get("input_cost_per_m",  0) / 1_000_000
+        + output_tokens * model_config.get("output_cost_per_m", 0) / 1_000_000
     )
-    search_cost_per_call = model_config.get("ydc_search_cost_per_call") or 0
+    if path == "ydc":
+        search_cost_per_call = model_config.get("ydc_search_cost_per_call") or 0
+        livecrawl_overage = 0.0
+        for call in stats.get("tool_calls", []):
+            if call.get("livecrawl"):
+                count = call.get("count", 5)
+                excess = max(0, count - 10)
+                livecrawl_overage += excess * 0.001  # $1/1000 URLs
+    else:
+        search_cost_per_call = model_config.get("native_search_cost_per_call") or 0
+        livecrawl_overage = 0.0
+
     search = stats["search_calls"] * search_cost_per_call
-
-    # Livecrawl overage: $1 per 1,000 URLs above the first 10 per call
-    livecrawl_overage = 0.0
-    for call in stats.get("tool_calls", []):
-        if call.get("livecrawl"):
-            count = call.get("count", 5)
-            excess = max(0, count - 10)
-            livecrawl_overage += excess * 0.001  # $1/1000 URLs
-
     total = llm + search + livecrawl_overage
     return {"llm": llm, "search": search, "livecrawl_overage": livecrawl_overage, "total": total}
-
-
-def calculate_native_costs(stats: dict, model_config: dict) -> dict:
-    """Return {"llm", "search", "total"} costs in USD for the native search path.
-
-    Separate from calculate_costs because native_search_cost_per_call can be
-    None (Llama has no native search) and the two paths use different config keys.
-    """
-    llm = (
-        stats["input_tokens"] * model_config["input_cost_per_m"] / 1_000_000
-        + stats["output_tokens"] * model_config["output_cost_per_m"] / 1_000_000
-    )
-    search_cost_per_call = model_config.get("native_search_cost_per_call") or 0
-    search = stats["search_calls"] * search_cost_per_call
-    return {"llm": llm, "search": search, "total": llm + search}
-
-
-# ─── Judge prompt ───────────────────────────────────────────────────────────
-
-JUDGE_SYSTEM_PROMPT = (
-    "You are an impartial evaluation judge. You will receive a question and two "
-    "answers (labeled Answer A and Answer B) from different search-grounded AI systems. "
-    "You do NOT know which system produced which answer.\n\n"
-    "IMPORTANT: You CANNOT verify factual claims. Do NOT attempt to judge whether "
-    "specific facts are true or false based on your own knowledge — your training "
-    "data may be outdated. Instead, evaluate the STRUCTURE and QUALITY of each "
-    "answer relative to the other.\n\n"
-    "Evaluate each answer on four dimensions using a 1-5 scale:\n"
-    "  • Completeness — Does the answer fully address all parts of the question?\n"
-    "  • Relevance — Is the information on-topic and useful for the question asked?\n"
-    "  • Specificity — Does the answer provide concrete details (dates, names, numbers, "
-    "    context) rather than vague or generic claims?\n"
-    "  • Citation Quality — Are sources cited, numbered, and traceable? Can a reader "
-    "    verify the claims by following the references?\n\n"
-    "Scoring rubric:\n"
-    "  5 = Excellent  4 = Good  3 = Adequate  2 = Poor  1 = Very poor\n\n"
-    "After scoring both answers, provide a head-to-head verdict: which answer is "
-    "better overall, or are they comparable?\n\n"
-    "Respond ONLY with valid JSON in this exact format, nothing else:\n"
-    "{\n"
-    '  "answer_a": {\n'
-    '    "completeness": <1-5>,\n'
-    '    "relevance": <1-5>,\n'
-    '    "specificity": <1-5>,\n'
-    '    "citation_quality": <1-5>,\n'
-    '    "reasoning": "<1-2 sentence justification>"\n'
-    "  },\n"
-    '  "answer_b": {\n'
-    '    "completeness": <1-5>,\n'
-    '    "relevance": <1-5>,\n'
-    '    "specificity": <1-5>,\n'
-    '    "citation_quality": <1-5>,\n'
-    '    "reasoning": "<1-2 sentence justification>"\n'
-    "  },\n"
-    '  "verdict": "<A_better | B_better | comparable>",\n'
-    '  "verdict_reasoning": "<1 sentence explaining the overall verdict>"\n'
-    "}"
-)
-
-
-# ─── Token tracking helpers ─────────────────────────────────────────────────
-
-def _empty_stats() -> dict:
-    """Initialize an empty stats dict for one run."""
-    return {
-        "path": "",
-        "model": "",
-        "model_confirmed": None,
-        "total_tokens": 0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "search_context_tokens": 0,
-        "api_calls": 0,
-        "search_calls": 0,
-        "hit_round_limit": False,
-        "sources": [],
-        "search_uuid": "",
-        "latency_ms": 0.0,
-        "answer": "",
-    }
 
 
 # ─── Path A: LLM + You.com Search ──────────────────────────────────────────
 
 def run_youdotcom(
     question: str,
-    client,
     model_config: dict,
     on_progress=None,
-    system_prompt: str = None,
-    force_chat_completions: bool = False,
 ) -> dict:
     """Run a query through LLM + You.com Search (tool-use approach).
 
-    Instantiates the right base_agent class for the model's provider and API shape,
-    then calls ask() — which runs the full tool-use loop and returns the stats dict.
-
-    API shape selection (controlled by model_config["api_shape"]):
-    - anthropic      → AnthropicAgent (unaffected by force_chat_completions)
-    - responses      → OpenAIResponsesAgent by default; OpenAICompatibleAgent if force_chat_completions=True
-                       GPT: default path. Qwen: tool named 'you_search' — DashScope intercepts
-                       'web_search' and routes to native search instead of calling our function.
-    - chat_completions→ OpenAICompatibleAgent always
-                       Kimi: Moonshot /v1/responses returns 404 (confirmed 2026-06-30)
-
-    Args:
-        force_chat_completions: Set True to use the legacy chat.completions path for GPT/Qwen.
-                                Has no effect on anthropic or kimi.
-    on_progress(msg: str) — optional callback fired on each search/round event.
-    system_prompt — override the default system prompt (for A/B testing).
-
-    See decisions/006_gpt_ydc_chat_vs_responses_api.md for full compatibility findings.
-    See decisions/007_agent_architecture.md for layer responsibilities.
+    Returns _empty_stats() shape (from base_agent) plus a "path" label field.
+    No translation — the agent's stats dict is returned directly.
     """
-    set_interface("direct_api")
-    prompt = get_system_prompt() if system_prompt is None else system_prompt
     model_id = model_config["model"]
     provider = model_config["provider"]
-    api_shape = model_config.get("api_shape", "chat_completions")
-    verbose = is_verbose()
-
-    def _notify(msg):
-        if verbose:
-            print(f"  [You.com] {msg}")
-        if on_progress:
-            on_progress(msg)
-
-    # Instantiate the right loop class based on provider and flags
-    if provider == "anthropic":
-        agent = AnthropicAgent(client=client, model=model_id, system_prompt=prompt)
-    elif api_shape == "responses" and not force_chat_completions:
-        agent = OpenAIResponsesAgent(client=client, model=model_id, system_prompt=prompt)
-    else:
-        max_tokens_param = model_config.get("max_tokens_param", "max_tokens")
-        extra_body = model_config.get("extra_body")
-        agent = OpenAICompatibleAgent(
-            client=client,
-            model=model_id,
-            system_prompt=prompt,
-            max_tokens_param=max_tokens_param,
-            extra_body=extra_body,
-        )
-
-    # Run the loop — on_progress fires at each search step
-    agent_stats = agent.ask(question, on_progress=_notify)
-
-    # Translate base_agent stats shape to compare.py's stats shape
-    stats = _empty_stats()
+    agent = _get_agent(provider, model_id)
+    stats = agent.ask(question, on_progress=on_progress)
     stats["path"] = f"{model_id} + You.com Search"
-    stats["model"] = model_id
-    stats["model_confirmed"] = agent_stats.get("model")
-    stats["answer"] = agent_stats["answer"]
-    stats["sources"] = agent_stats["sources"]
-    stats["search_uuid"] = agent_stats.get("search_uuid", "")
-    stats["total_tokens"] = agent_stats["tokens_used"]
-    stats["input_tokens"] = agent_stats["token_breakdown"]["input"]
-    stats["output_tokens"] = agent_stats["token_breakdown"]["output"]
-    stats["search_context_tokens"] = agent_stats["token_breakdown"]["search_context"]
-    stats["api_calls"] = agent_stats["api_calls"]
-    stats["search_calls"] = agent_stats["search_calls"]
-    stats["latency_ms"] = agent_stats["latency_ms"]
-    stats["tool_calls"] = agent_stats.get("tool_calls", [])
     return stats
 
 
@@ -328,7 +184,6 @@ def run_youdotcom(
 
 def run_native(
     question: str,
-    client,  # retained for API compatibility — agent classes create their own clients
     model_config: dict,
     on_progress=None,
     system_prompt: str = None,
@@ -346,27 +201,26 @@ def run_native(
                      "chat" (chat.completions with web_search_preview tool).
     """
     if not model_config.get("native_search_tool"):
-        stats = _empty_stats()
+        from base_agent import _empty_stats as _es
+        _mid = model_config.get("model", "")
+        stats = _es(_mid)
         stats["not_supported"] = True
+        stats["path"] = f"{_mid} + Native Web Search"
         stats["answer"] = "Native web search is not supported for this model."
         return stats
 
     provider = model_config["provider"]
     model_id = model_config["model"]
+    agent = _get_agent(provider, model_id)
 
-    # Instantiate the provider's agent class and call run_native_search().
-    # Each agent class resolves its own API key from the environment.
     if provider == "anthropic":
-        agent = ClaudeAgent(model=model_id)
         base_stats = agent.run_native_search(
             question,
             system_prompt=system_prompt,
             on_progress=on_progress,
             native_search_tool=model_config.get("native_search_tool"),
         )
-
     elif provider == "openai":
-        agent = OpenAIAgent(model=model_id)
         base_stats = agent.run_native_search(
             question,
             system_prompt=system_prompt,
@@ -375,198 +229,20 @@ def run_native(
             chat_native_search_tool=model_config.get("chat_native_search_tool"),
             path=native_path,
         )
-
-    elif provider == "kimi":
-        agent = KimiAgent(model=model_id)
-        base_stats = agent.run_native_search(
-            question,
-            system_prompt=system_prompt,
-            on_progress=on_progress,
-        )
-
-    elif provider == "qwen":
-        agent = QwenAgent(model=model_id)
-        base_stats = agent.run_native_search(
-            question,
-            system_prompt=system_prompt,
-            on_progress=on_progress,
-        )
-
     else:
-        raise ValueError(f"Unknown provider: {provider}")
+        base_stats = agent.run_native_search(
+            question,
+            system_prompt=system_prompt,
+            on_progress=on_progress,
+        )
 
-    # Translate base_agent shape → compare.py flat shape
     path_label = f"{model_id} + Native Web Search"
     if native_path == "chat":
         path_label = f"{model_id} + Native Web Search (chat.completions)"
-
-    stats = _empty_stats()
-    stats["path"] = path_label
-    stats["model"] = model_id
-    stats["model_confirmed"] = base_stats.get("model_confirmed")
-    stats["answer"] = base_stats.get("answer", "")
-    stats["sources"] = base_stats.get("sources", [])
-    stats["total_tokens"] = base_stats.get("tokens_used", 0)
-    stats["input_tokens"] = base_stats.get("token_breakdown", {}).get("input", 0)
-    stats["output_tokens"] = base_stats.get("token_breakdown", {}).get("output", 0)
-    stats["search_context_tokens"] = base_stats.get("token_breakdown", {}).get("search_context", 0)
-    stats["api_calls"] = base_stats.get("api_calls", 0)
-    stats["search_calls"] = base_stats.get("search_calls", 0)
-    stats["latency_ms"] = base_stats.get("latency_ms", 0.0)
-    return stats
+    base_stats["path"] = path_label
+    return base_stats
 
 
-
-
-# ─── Judge evaluation ───────────────────────────────────────────────────────
-
-def _answer_with_sources(answer: str, sources: list[str]) -> str:
-    """Append a numbered source list to an answer for judge evaluation.
-
-    The LLM's answer often cites [1], [2] etc. but the actual URLs are tracked
-    separately in stats["sources"]. Without appending them, the judge sees
-    citation markers with no traceable references — unfairly penalizing the
-    You.com path on citation quality.
-    """
-    if not sources:
-        return answer
-    source_block = "\n\nSources:\n" + "\n".join(
-        f"[{i}] {url}" for i, url in enumerate(sources, 1)
-    )
-    return answer + source_block
-
-
-def run_judge(
-    question: str,
-    answer_ydc: str,
-    answer_native: str,
-    judge_model: str,
-    sources_ydc: list[str] | None = None,
-    sources_native: list[str] | None = None,
-) -> dict:
-    """Run a blind cross-model evaluation of both answers.
-
-    Randomly assigns answers to A/B positions to prevent position bias.
-    Uses a different LLM than the one being tested.
-
-    Args:
-        sources_ydc:    Optional list of URLs from the You.com path, appended
-                        to the answer so the judge can evaluate citation traceability.
-        sources_native: Optional list of URLs from the native path (usually already
-                        inline in the answer text, but included for symmetry).
-
-    Returns:
-        dict with keys: youdotcom_scores, native_scores, judge_model, position_map
-    """
-    # Guard against None answers before string operations
-    answer_ydc = answer_ydc or ""
-    answer_native = answer_native or ""
-    # Append source lists so the judge can evaluate citation traceability
-    answer_ydc = _answer_with_sources(answer_ydc, sources_ydc or [])
-    answer_native = _answer_with_sources(answer_native, sources_native or [])
-    # Randomize position to prevent bias
-    if random.random() < 0.5:
-        answer_a, answer_b = answer_ydc, answer_native
-        position_map = {"a": "youdotcom", "b": "native"}
-    else:
-        answer_a, answer_b = answer_native, answer_ydc
-        position_map = {"a": "native", "b": "youdotcom"}
-
-    judge_prompt = (
-        f"Question: {question}\n\n"
-        f"--- Answer A ---\n{answer_a}\n\n"
-        f"--- Answer B ---\n{answer_b}\n\n"
-        f"Evaluate both answers. Respond with JSON only."
-    )
-
-    if judge_model == "openai":
-        # Use GPT-5.4 as judge (cross-model: GPT judges Claude)
-        openai_key = os.environ.get("OPENAI_API_KEY", "")
-        if not openai_key:
-            return {"error": "OPENAI_API_KEY not set — skipping judge evaluation"}
-
-        judge_client = OpenAI(api_key=openai_key)
-        response = judge_client.chat.completions.create(
-            model="gpt-5.4",
-            messages=[
-                {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
-                {"role": "user", "content": judge_prompt},
-            ],
-            max_completion_tokens=1024,
-            temperature=0,
-        )
-        raw = response.choices[0].message.content
-
-    elif judge_model == "claude":
-        # Use Claude as judge
-        anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
-        if not anthropic_key:
-            return {"error": "ANTHROPIC_API_KEY not set — skipping judge evaluation"}
-
-        judge_client = Anthropic(api_key=anthropic_key)
-        response = judge_client.messages.create(
-            model="claude-sonnet-4-6",
-            system=JUDGE_SYSTEM_PROMPT,
-            max_tokens=1024,
-            messages=[{"role": "user", "content": judge_prompt}],
-        )
-        raw = ""
-        for block in response.content:
-            if hasattr(block, "text"):
-                raw += block.text
-    else:
-        return {"error": f"Unknown judge model: {judge_model}"}
-
-    # Parse judge response
-    try:
-        # Strip markdown code fences if present
-        clean = raw.strip()
-        if clean.startswith("```"):
-            clean = clean.split("\n", 1)[1]
-            clean = clean.rsplit("```", 1)[0]
-        scores = json.loads(clean)
-    except (json.JSONDecodeError, IndexError):
-        import logging
-        logging.debug(f"Judge returned invalid JSON (first 200 chars): {raw[:200]}")
-        return {"error": "Judge returned invalid JSON — check logs for details"}
-
-    # Map positions back to paths
-    ydc_key = "answer_a" if position_map["a"] == "youdotcom" else "answer_b"
-    native_key = "answer_a" if position_map["a"] == "native" else "answer_b"
-
-    # Replace A/B references in reasoning with actual path names
-    a_label = "LLM + You.com" if position_map["a"] == "youdotcom" else "LLM + Native"
-    b_label = "LLM + You.com" if position_map["b"] == "youdotcom" else "LLM + Native"
-    def _replace_ab(text):
-        if not isinstance(text, str):
-            return text
-        return (text
-            .replace("Answer A", a_label)
-            .replace("Answer B", b_label)
-            .replace("answer A", a_label)
-            .replace("answer B", b_label))
-
-    for key in ["answer_a", "answer_b"]:
-        if key in scores and "reasoning" in scores[key]:
-            scores[key]["reasoning"] = _replace_ab(scores[key]["reasoning"])
-
-    # Map verdict from A/B to youdotcom/native/comparable
-    raw_verdict = scores.get("verdict", "comparable")
-    if raw_verdict == "A_better":
-        verdict = position_map["a"]  # whoever was in position A
-    elif raw_verdict == "B_better":
-        verdict = position_map["b"]
-    else:
-        verdict = "comparable"
-
-    return {
-        "youdotcom_scores": scores.get(ydc_key, {}),
-        "native_scores": scores.get(native_key, {}),
-        "judge_model": judge_model,
-        "position_map": position_map,
-        "verdict": verdict,
-        "verdict_reasoning": _replace_ab(scores.get("verdict_reasoning", "")),
-    }
 
 
 # ─── Comparison output ──────────────────────────────────────────────────────
@@ -586,7 +262,7 @@ def print_comparison(
     ydc_costs = calculate_costs(ydc, model_config)
     ydc_llm, ydc_search, ydc_cost = ydc_costs["llm"], ydc_costs["search"], ydc_costs["total"]
 
-    native_costs = calculate_native_costs(native, model_config)
+    native_costs = calculate_costs(native, model_config, path="native")
     native_llm, native_search, native_cost = native_costs["llm"], native_costs["search"], native_costs["total"]
 
     print("\n" + "=" * 78)
@@ -604,19 +280,22 @@ def print_comparison(
     print(f"{'METRIC':<30} {'You.com':>{w}} {'Native':>{w}}")
     print(f"{'-'*30} {'-'*w} {'-'*w}")
 
+    def _tok(s, key):
+        return s.get("token_breakdown", {}).get(key, 0)
+
     rows = [
         ("Total tokens",
-         f"{ydc['total_tokens']:,}",
-         f"{native['total_tokens']:,}"),
+         f"{ydc['tokens_used']:,}",
+         f"{native['tokens_used']:,}"),
         ("  Input tokens",
-         f"{ydc['input_tokens']:,}",
-         f"{native['input_tokens']:,}"),
+         f"{_tok(ydc, 'input'):,}",
+         f"{_tok(native, 'input'):,}"),
         ("  Output tokens",
-         f"{ydc['output_tokens']:,}",
-         f"{native['output_tokens']:,}"),
+         f"{_tok(ydc, 'output'):,}",
+         f"{_tok(native, 'output'):,}"),
         ("  Search context (est.)",
-         f"~{ydc['search_context_tokens']:,}",
-         f"~{native['search_context_tokens']:,}"),
+         f"~{_tok(ydc, 'search_context'):,}",
+         f"~{_tok(native, 'search_context'):,}"),
         ("", "", ""),
         ("API calls",
          f"{ydc['api_calls']}",
@@ -650,9 +329,9 @@ def print_comparison(
         print(f"{label:<30} {ydc_val:>{w}} {native_val:>{w}}")
 
     # Savings summary
-    if native["total_tokens"] > 0:
-        savings = native["total_tokens"] - ydc["total_tokens"]
-        savings_pct = (savings / native["total_tokens"]) * 100
+    if native["tokens_used"] > 0:
+        savings = native["tokens_used"] - ydc["tokens_used"]
+        savings_pct = (savings / native["tokens_used"]) * 100
         if savings > 0:
             print(f"\n  Token savings with You.com: {savings:,} tokens ({savings_pct:.0f}% fewer)")
         elif savings < 0:
@@ -673,7 +352,7 @@ def print_comparison(
             print("QUALITY EVALUATION (blind cross-model judge)")
             print(f"{'='*78}")
 
-            ydc_s = judge_result["youdotcom_scores"]
+            ydc_s = judge_result["ydc_scores"]
             nat_s = judge_result["native_scores"]
 
             dimensions = ["completeness", "relevance", "specificity", "citation_quality"]
@@ -725,7 +404,7 @@ def print_comparison(
             verdict_reasoning = judge_result.get("verdict_reasoning", "")
             if verdict:
                 verdict_label = {
-                    "youdotcom": "You.com path is better",
+                    "ydc": "You.com path is better",
                     "native": "Native path is better",
                     "comparable": "Both paths are comparable",
                 }.get(verdict, verdict)
@@ -775,57 +454,6 @@ def print_comparison(
     print()
 
 
-# ─── Client factory ────────────────────────────────────────────────────────
-
-LLM_TIMEOUT = 300  # seconds — native built-in search can take minutes on complex queries
-
-def _create_client(model_config: dict):
-    """Create the appropriate API client for the given provider.
-
-    Returns an Anthropic or OpenAI client, raising if the API key is missing.
-    """
-    provider = model_config["provider"]
-
-    if provider == "anthropic":
-        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-        if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY not set.")
-        return Anthropic(api_key=api_key, timeout=LLM_TIMEOUT)
-
-    elif provider == "openai":
-        # Support optional base_url/api_key_env overrides for OpenAI-compatible providers (e.g. Together AI).
-        api_key_env = model_config.get("api_key_env", "OPENAI_API_KEY")
-        api_key = os.environ.get(api_key_env, "")
-        if not api_key:
-            raise ValueError(f"{api_key_env} not set.")
-        kwargs = {"api_key": api_key, "timeout": LLM_TIMEOUT}
-        if model_config.get("base_url"):
-            kwargs["base_url"] = model_config["base_url"]
-        return OpenAI(**kwargs)
-
-    elif provider == "kimi":
-        api_key = os.environ.get("MOONSHOT_API_KEY", "")
-        if not api_key:
-            raise ValueError("MOONSHOT_API_KEY not set.")
-        return OpenAI(api_key=api_key, base_url="https://api.moonshot.ai/v1", timeout=LLM_TIMEOUT)
-
-    elif provider == "qwen":
-        api_key = os.environ.get("DASHSCOPE_API_KEY", "")
-        if not api_key:
-            raise ValueError("DASHSCOPE_API_KEY not set.")
-        # Standard DashScope international endpoint — required for enable_search.
-        # The MaaS workspace endpoint (DASHSCOPE_BASE_URL) does NOT support enable_search.
-        # Both endpoints use the same DASHSCOPE_API_KEY.
-        return OpenAI(
-            api_key=api_key,
-            base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-            timeout=LLM_TIMEOUT,
-        )
-
-    else:
-        raise ValueError(f"Unknown provider: {provider}")
-
-
 # ─── Main ───────────────────────────────────────────────────────────────────
 
 def main():
@@ -873,8 +501,6 @@ def main():
         print("Error: YDC_API_KEY not set.")
         sys.exit(1)
 
-    client = _create_client(model_config)
-
     print(f"Comparison: {model_config['model']} + You.com vs. {model_config['model']} + Native Search")
     print(f"Query:      \"{query}\"")
     print(f"Judge:      {'OFF' if skip_judge else model_config['judge'] + ' (cross-model, blind)'}")
@@ -883,17 +509,17 @@ def main():
 
     # Run both paths
     print("Running You.com path...")
-    ydc_stats = run_youdotcom(query, client, model_config)
-    print(f"  Done ({ydc_stats['total_tokens']:,} tokens, {ydc_stats['latency_ms']:.0f}ms)")
+    ydc_stats = run_youdotcom(query, model_config)
+    print(f"  Done ({ydc_stats['tokens_used']:,} tokens, {ydc_stats['latency_ms']:.0f}ms)")
 
     print("Running Native path...")
-    native_stats = run_native(query, client, model_config)
-    print(f"  Done ({native_stats['total_tokens']:,} tokens, {native_stats['latency_ms']:.0f}ms)")
+    native_stats = run_native(query, model_config)
+    print(f"  Done ({native_stats['tokens_used']:,} tokens, {native_stats['latency_ms']:.0f}ms)")
 
     # Run judge evaluation
     judge_result = None
-    if not skip_judge:
-        judge_model = model_config["judge"]
+    judge_model = model_config.get("judge")
+    if not skip_judge and judge_model:
         print(f"Running judge evaluation ({judge_model})...")
         judge_result = run_judge(
             query, ydc_stats["answer"], native_stats["answer"], judge_model,

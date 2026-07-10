@@ -32,6 +32,8 @@ Requirements:
 The grounding/ directory is fully self-contained. Clone it and go.
 """
 
+import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -40,156 +42,38 @@ from typing import Generator
 from dotenv import load_dotenv
 load_dotenv("env.txt") or load_dotenv(".env")
 
-from search_tool import (
-    SYSTEM_PROMPT,      # Static base prompt — for display
-    is_verbose,
-    set_interface,
-)
-from base_agent import AnthropicAgent, OpenAICompatibleAgent, OpenAIResponsesAgent
+from search_tool import set_interface
+from agent_pool import get_agent as _get_agent_pool
 
 
-# ─── Model configurations ──────────────────────────────────────────────────
-# Single source of truth for every supported LLM. Each entry contains
-# everything needed to create a client and run the tool-use loop.
+# ─── Model registry — loaded from pricing.json ─────────────────────────────
+# pricing.json is the single source of truth for model IDs, display names, and
+# vendor strings. Set in_playground: true there to include a model here —
+# no code change required.
 #
-# api_shape controls which base class is used:
-#   "anthropic"       → AnthropicAgent
-#   "responses"       → OpenAIResponsesAgent (default for GPT, Qwen)
-#   "chat_completions"→ OpenAICompatibleAgent (Kimi, Llama, and fallback)
+# pricing.json lives in comparison/ (one level up). This is the only
+# cross-directory read at startup; everything else in grounding/ is self-contained.
 
-GROUNDING_MODELS = {
-    "claude": {
-        "model": "claude-sonnet-4-6",
-        "provider": "anthropic",
-        "api_shape": "anthropic",
-        "display_name": "Claude Sonnet 4.6",
-        "vendor": "Anthropic",
-        "env_key": "ANTHROPIC_API_KEY",
-        "base_url": None,
-    },
-    "gpt5.4": {
-        "model": "gpt-5.4",
-        "provider": "openai",
-        "api_shape": "responses",
-        "display_name": "GPT-5.4",
-        "vendor": "OpenAI",
-        "env_key": "OPENAI_API_KEY",
-        "base_url": None,
-        "max_tokens_param": "max_completion_tokens",  # GPT-5.x uses this instead of max_tokens
-    },
-    "qwen": {
-        "model": "qwen3.7-max",
-        "provider": "openai",
-        "api_shape": "responses",
-        "display_name": "Qwen3.7 Max",
-        "vendor": "Alibaba (MaaS workspace)",
-        "env_key": "DASHSCOPE_API_KEY",
-        "base_url_env": "DASHSCOPE_BASE_URL",  # read from env so the workspace URL isn't hardcoded
-        "extra_body": {"enable_thinking": False},  # only applies to chat.completions fallback
-    },
-    "kimi": {
-        "model": "kimi-k2.6",
-        "provider": "openai",
-        "api_shape": "chat_completions",   # Moonshot /v1/responses returns 404, confirmed 2026-06-30
-        "display_name": "Kimi K2.6",
-        "vendor": "Moonshot AI",
-        "env_key": "MOONSHOT_API_KEY",
-        "base_url": "https://api.moonshot.ai/v1",
-    },
-    "llama": {
-        "model": "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
-        "provider": "openai",
-        "api_shape": "chat_completions",
-        "display_name": "Llama 4 Maverick",
-        "vendor": "Meta (via Together AI)",
-        "env_key": "TOGETHER_API_KEY",
-        "base_url": "https://api.together.xyz/v1",
-    },
+def _load_grounding_models() -> dict:
+    pricing_path = Path(__file__).parent.parent / "comparison" / "pricing.json"
+    with open(pricing_path) as f:
+        data = json.load(f)
+    return {
+        key: {
+            "model":        cfg["model"],
+            "display_name": cfg["display_name"],
+            "vendor":       cfg.get("vendor", ""),
+            "provider":     cfg["provider"],
+        }
+        for key, cfg in data["models"].items()
+        if cfg.get("in_playground")
+    }
 
-    # ── Newer models (added 2026-06-30) ──────────────────────────────────────
-
-    "claude-opus": {
-        "model": "claude-opus-4-8",
-        "provider": "anthropic",
-        "api_shape": "anthropic",
-        "display_name": "Claude Opus 4.8",
-        "vendor": "Anthropic",
-        "env_key": "ANTHROPIC_API_KEY",
-        "base_url": None,
-    },
-    "gpt5.5": {
-        "model": "gpt-5.5",
-        "provider": "openai",
-        "api_shape": "responses",
-        "display_name": "GPT-5.5",
-        "vendor": "OpenAI",
-        "env_key": "OPENAI_API_KEY",
-        "base_url": None,
-        "max_tokens_param": "max_completion_tokens",
-    },
-}
+GROUNDING_MODELS = _load_grounding_models()
 
 
-# ─── Client factory ────────────────────────────────────────────────────────
-
-LLM_TIMEOUT = 60  # seconds — max wait for any single LLM API call
-
-def _create_client(model_config: dict):
-    """Create the appropriate API client for the given model config."""
-    provider = model_config["provider"]
-    api_key = os.environ.get(model_config["env_key"], "")
-
-    if not api_key:
-        raise ValueError(
-            f"{model_config['env_key']} not set. "
-            f"Export it or add it to env.txt."
-        )
-
-    if provider == "anthropic":
-        from anthropic import Anthropic
-        return Anthropic(api_key=api_key, timeout=LLM_TIMEOUT)
-
-    elif provider == "openai":
-        from openai import OpenAI
-        kwargs = {"api_key": api_key, "timeout": LLM_TIMEOUT}
-        if model_config.get("base_url"):
-            kwargs["base_url"] = model_config["base_url"]
-        elif model_config.get("base_url_env"):
-            url = os.environ.get(model_config["base_url_env"], "")
-            if url:
-                kwargs["base_url"] = url
-        return OpenAI(**kwargs)
-
-    else:
-        raise ValueError(f"Unknown provider: {provider}")
-
-
-def _create_agent(model_config: dict, client, force_chat_completions: bool):
-    """Instantiate the right base class for the given model config.
-
-    api_shape in GROUNDING_MODELS is the primary signal:
-      "anthropic"       → AnthropicAgent
-      "responses"       → OpenAIResponsesAgent (unless force_chat_completions=True)
-      "chat_completions"→ OpenAICompatibleAgent always
-
-    force_chat_completions has no effect on anthropic or chat_completions agents.
-    """
-    shape = model_config.get("api_shape", "chat_completions")
-    model_id = model_config["model"]
-    max_tokens_param = model_config.get("max_tokens_param", "max_tokens")
-    extra_body = model_config.get("extra_body")
-
-    if shape == "anthropic":
-        return AnthropicAgent(client=client, model=model_id)
-    elif shape == "responses" and not force_chat_completions:
-        return OpenAIResponsesAgent(client=client, model=model_id)
-    else:
-        return OpenAICompatibleAgent(
-            client=client,
-            model=model_id,
-            max_tokens_param=max_tokens_param,
-            extra_body=extra_body,
-        )
+def _create_agent(model_config: dict, force_chat_completions: bool):
+    return _get_agent_pool(model_config["provider"], model_config["model"], force_chat_completions)
 
 
 # ─── Streaming grounding runner ────────────────────────────────────────────
@@ -226,7 +110,7 @@ def run_grounding(
     model_id = model_config["model"]
 
     try:
-        client = _create_client(model_config)
+        agent = _create_agent(model_config, force_chat_completions)
     except ValueError as e:
         yield {"event": "error", "message": str(e)}
         return
@@ -242,53 +126,15 @@ def run_grounding(
         "question": question,
     }
 
-    agent = _create_agent(model_config, client, force_chat_completions)
-
     try:
         for event in agent.stream(question):
-            etype = event["event"]
-            if etype == "done":
-                # Translate base_agent stats shape to the shape server.py expects
-                s = event.get("stats", {})
-                breakdown = s.get("token_breakdown", {})
-                yield {
-                    "event": "done",
-                    "stats": {
-                        "total_tokens": s.get("tokens_used", 0),
-                        "input_tokens": breakdown.get("input", 0),
-                        "output_tokens": breakdown.get("output", 0),
-                        "search_context_tokens": breakdown.get("search_context", 0),
-                        "api_calls": s.get("api_calls", 0),
-                        "search_calls": s.get("search_calls", 0),
-                        "sources": s.get("sources", []),
-                        "search_uuid": s.get("search_uuid", ""),
-                        "latency_ms": round(s.get("latency_ms", 0)),
-                        "tool_calls": s.get("tool_calls", 0),
-                        "model_confirmed": s.get("model"),
-                    },
-                }
-            else:
-                yield event
+            yield event
     except Exception as e:
-        import logging
         logging.exception("agent.stream() raised an unexpected error")
-        yield {
-            "event": "done",
-            "error": str(e),
-            "stats": {
-                "total_tokens": 0,
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "search_context_tokens": 0,
-                "api_calls": 0,
-                "search_calls": 0,
-                "sources": [],
-                "search_uuid": "",
-                "latency_ms": 0,
-                "tool_calls": 0,
-                "model_confirmed": None,
-            },
-        }
+        from base_agent import _empty_stats
+        stats = _empty_stats(model_id)
+        stats["answer"] = f"Error: {e}"
+        yield {"event": "done", "error": str(e), "stats": stats}
 
 
 # ─── CLI output ────────────────────────────────────────────────────────────
@@ -335,15 +181,16 @@ def print_grounding_trace(model_key: str, question: str, force_chat_completions:
 
         elif etype == "done":
             s = event["stats"]
+            tb = s.get("token_breakdown", {})
             print(f"\n{'─'*72}")
             print(f"STATS:")
-            print(f"  Total tokens:     {s['total_tokens']:,}")
-            print(f"    Input:          {s['input_tokens']:,}")
-            print(f"    Output:         {s['output_tokens']:,}")
-            print(f"    Search context: ~{s['search_context_tokens']:,}")
-            print(f"  API calls:        {s['api_calls']}")
-            print(f"  Search calls:     {s['search_calls']}")
-            print(f"  Latency:          {s['latency_ms']:,}ms")
+            print(f"  Total tokens:     {s.get('tokens_used', 0):,}")
+            print(f"    Input:          {tb.get('input', 0):,}")
+            print(f"    Output:         {tb.get('output', 0):,}")
+            print(f"    Search context: ~{tb.get('search_context', 0):,}")
+            print(f"  API calls:        {s.get('api_calls', 0)}")
+            print(f"  Search calls:     {s.get('search_calls', 0)}")
+            print(f"  Latency:          {s.get('latency_ms', 0):,}ms")
             if s.get("search_uuid"):
                 print(f"  Search UUID:      {s['search_uuid']}")
             print(f"{'='*72}\n")

@@ -33,10 +33,23 @@ Event shapes from stream():
     {"event": "answer",        "text": str, "sources": list}
     {"event": "done",          "stats": dict}
 
-Stats dict shape (all agents return the same structure):
-    answer, sources, tool_calls, model, interface, tokens_used,
-    token_breakdown {input, output, search_context},
-    search_calls, api_calls, latency_ms
+Stats dict — canonical shape returned by ask() and run_native_search() on all agents:
+    answer           str    Final answer text, with [N] citation markers where applicable.
+    sources          list   Ordered source URLs cited in the answer.
+    tool_calls       list   YDC search log entries. Empty for native search paths.
+    model            str    Model ID as passed by the caller.
+    model_confirmed  str    Model ID as confirmed by the API response (may differ).
+    interface        str    Which search path ran: "ydc", "native_responses" (OpenAI Responses
+                            API), "native_messages" (Anthropic Messages API), "native_chat"
+                            (chat.completions tool loop), "native_exa" (OpenRouter :online suffix),
+                            "not_supported", or INTEGRATION_INTERFACE.
+    tokens_used      int    Total tokens consumed (input + output).
+    token_breakdown  dict   {"input": int, "output": int, "search_context": int}
+    search_calls     int    Number of search round-trips executed.
+    api_calls        int    Number of LLM API calls made (>1 for multi-round loops).
+    latency_ms       float  Wall-clock time from first request to final answer.
+
+    See _empty_stats() in this file for the authoritative definition.
 
 What does NOT belong here:
     Client instantiation, API keys, base URLs, model defaults, provider
@@ -69,24 +82,53 @@ from search_tool import (
 logger = logging.getLogger(__name__)
 
 
+# ─── Pricing / model defaults ─────────────────────────────────────────────────
+
+def _get_agent_default_model(provider: str, fallback: str) -> str:
+    """Return the default model for a provider from pricing.json.
+
+    Reads the entry with agent_default=true for the given provider. Falls back
+    to the hardcoded string if pricing.json cannot be found or parsed. This
+    keeps pricing.json as the single source of truth for model selection —
+    set agent_default: true on one entry per provider there to change defaults.
+    """
+    try:
+        from pathlib import Path as _Path
+        pricing_path = _Path(__file__).parent.parent / "comparison" / "pricing.json"
+        with open(pricing_path) as _f:
+            data = json.load(_f)
+        for entry in data.get("models", {}).values():
+            if entry.get("provider") == provider and entry.get("agent_default"):
+                return entry["model"]
+    except Exception:
+        pass
+    return fallback
+
+
 # ─── Shared utilities ─────────────────────────────────────────────────────────
 
 def _empty_stats(model: str = "") -> dict:
-    """Return a fresh stats dict. All loop implementations use this shape.
+    """Return a fresh stats dict — the canonical shape for all agent return values.
+
+    This is the authoritative definition of what ask() and run_native_search()
+    return on every agent class. Do not define a parallel shape elsewhere.
 
     Fields:
-        answer           — final answer text (with [N] citation markers if applicable)
-        sources          — ordered list of source URLs cited in the answer
-        tool_calls       — YDC search log entries (empty for native search paths)
-        model            — model ID as configured by the caller
-        model_confirmed  — model ID as confirmed by the API response (may differ)
-        interface        — which search integration was used: "ydc", "native_responses",
-                           "native_chat", or the INTEGRATION_INTERFACE constant
-        tokens_used      — total tokens (input + output)
-        token_breakdown  — per-category breakdown: input, output, search_context
-        search_calls     — number of search round-trips executed
-        api_calls        — number of LLM API calls made
-        latency_ms       — wall-clock time from first request to final answer
+        answer           str    Final answer text, with [N] citation markers where applicable.
+        sources          list   Ordered source URLs cited in the answer.
+        tool_calls       list   YDC search log entries. Empty for native search paths.
+        model            str    Model ID as passed by the caller.
+        model_confirmed  str    Model ID as confirmed by the API response (may differ).
+        interface        str    Which search path ran: "ydc", "native_responses"
+                                (OpenAI Responses API), "native_messages" (Anthropic
+                                Messages API), "native_chat" (chat.completions tool loop),
+                                "not_supported", or INTEGRATION_INTERFACE.
+        tokens_used      int    Total tokens consumed (input + output).
+        token_breakdown  dict   {"input": int, "output": int, "search_context": int}
+        search_calls     int    Number of search round-trips executed.
+        api_calls        int    Number of LLM API calls made (>1 for multi-round loops).
+        latency_ms       float  Wall-clock time from first request to final answer.
+        not_supported    bool   True when the requested search path is unavailable for this model.
     """
     return {
         "answer": "",
@@ -100,6 +142,10 @@ def _empty_stats(model: str = "") -> dict:
         "search_calls": 0,
         "api_calls": 0,
         "latency_ms": 0.0,
+        "connect_ms": 0,
+        "hit_round_limit": False,
+        "search_uuid": "",
+        "not_supported": False,
     }
 
 
@@ -131,18 +177,21 @@ class BaseAgent(ABC):
 
     def __init__(self, model: str, system_prompt: str = None):
         self.model = model
-        self.system_prompt = system_prompt if system_prompt is not None else get_system_prompt()
+        self.system_prompt = system_prompt if system_prompt is not None else get_system_prompt(model)
 
     @abstractmethod
-    def stream(self, question: str) -> Generator[dict, None, None]:
+    def stream(self, question: str, max_rounds: int = None) -> Generator[dict, None, None]:
         """Run the tool-use loop, yielding structured events at each step.
+
+        max_rounds: cap the tool-use loop at this many rounds. None uses the
+                    global MAX_TOOL_ROUNDS from search_tool.py.
 
         Must always yield "answer" followed by "done" as the last two events,
         even on error. Callers rely on "done" to know the loop has finished.
         """
         ...
 
-    def ask(self, question: str, on_progress=None) -> dict:
+    def ask(self, question: str, on_progress=None, max_rounds: int = None) -> dict:
         """Synchronous wrapper around stream().
 
         Consumes all events, fires on_progress(str) for each step, and
@@ -153,7 +202,7 @@ class BaseAgent(ABC):
         """
         stats = None
         try:
-            for event in self.stream(question):
+            for event in self.stream(question, max_rounds=max_rounds):
                 if on_progress:
                     msg = _event_to_message(event)
                     if msg:
@@ -186,16 +235,18 @@ class AnthropicAgent(BaseAgent):
         super().__init__(model, system_prompt)
         self.client = client
 
-    def stream(self, question: str) -> Generator[dict, None, None]:
+    def stream(self, question: str, max_rounds: int = None) -> Generator[dict, None, None]:
         stats = _empty_stats(self.model)
         messages = [{"role": "user", "content": question}]
         t0 = time.perf_counter()
         baseline_input = 0
         search_num = 0
         response = None
+        _max_rounds = max_rounds if max_rounds is not None else MAX_TOOL_ROUNDS
 
-        for round_num in range(MAX_TOOL_ROUNDS):
+        for round_num in range(_max_rounds):
             try:
+                t_connect = time.perf_counter()
                 response = self.client.messages.create(
                     model=self.model,
                     system=self.system_prompt,
@@ -203,6 +254,8 @@ class AnthropicAgent(BaseAgent):
                     tools=[TOOL_SCHEMA_ANTHROPIC],
                     messages=messages,
                 )
+                if round_num == 0:
+                    stats["connect_ms"] = round((time.perf_counter() - t_connect) * 1000)
             except Exception as e:
                 logger.error("API call failed (model=%s, round=%d): %s", self.model, round_num, e)
                 stats["answer"] = f"Error: {e}"
@@ -218,6 +271,7 @@ class AnthropicAgent(BaseAgent):
             stats["api_calls"] += 1
             if round_num == 0:
                 baseline_input = call_input
+                stats["model_confirmed"] = getattr(response, "model", None)
 
             if response.stop_reason != "tool_use":
                 break
@@ -246,6 +300,9 @@ class AnthropicAgent(BaseAgent):
                 stats["tool_calls"].append(entry)
                 sources = extract_urls(result)
                 stats["sources"].extend(sources)
+                uuid = entry.get("search_uuid", "")
+                if uuid:
+                    stats["search_uuid"] = uuid
                 stats["search_calls"] += 1
 
                 if is_verbose():
@@ -270,7 +327,8 @@ class AnthropicAgent(BaseAgent):
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user", "content": tool_results})
         else:
-            logger.warning("Tool loop hit MAX_TOOL_ROUNDS=%d (model=%s)", MAX_TOOL_ROUNDS, self.model)
+            stats["hit_round_limit"] = True
+            logger.warning("Tool loop hit max_rounds=%d (model=%s)", _max_rounds, self.model)
 
         for block in (response.content if response is not None else []):
             if hasattr(block, "text"):
@@ -321,7 +379,7 @@ class OpenAICompatibleAgent(BaseAgent):
         self.max_tokens_param = max_tokens_param
         self.extra_body = extra_body
 
-    def stream(self, question: str) -> Generator[dict, None, None]:
+    def stream(self, question: str, max_rounds: int = None) -> Generator[dict, None, None]:
         stats = _empty_stats(self.model)
         messages = [
             {"role": "system", "content": self.system_prompt},
@@ -330,8 +388,10 @@ class OpenAICompatibleAgent(BaseAgent):
         t0 = time.perf_counter()
         baseline_input = 0
         search_num = 0
+        _max_rounds = max_rounds if max_rounds is not None else MAX_TOOL_ROUNDS
+        response = None
 
-        for round_num in range(MAX_TOOL_ROUNDS):
+        for round_num in range(_max_rounds):
             try:
                 create_kwargs = {
                     "model": self.model,
@@ -341,7 +401,10 @@ class OpenAICompatibleAgent(BaseAgent):
                 }
                 if self.extra_body:
                     create_kwargs["extra_body"] = self.extra_body
+                t_connect = time.perf_counter()
                 response = self.client.chat.completions.create(**create_kwargs)
+                if round_num == 0:
+                    stats["connect_ms"] = round((time.perf_counter() - t_connect) * 1000)
             except Exception as e:
                 logger.error("API call failed (model=%s, round=%d): %s", self.model, round_num, e)
                 stats["answer"] = f"Error: {e}"
@@ -358,6 +421,8 @@ class OpenAICompatibleAgent(BaseAgent):
                 if round_num == 0:
                     baseline_input = call_input
             stats["api_calls"] += 1
+            if round_num == 0:
+                stats["model_confirmed"] = getattr(response, "model", None)
 
             if not response.choices:
                 logger.error("API returned empty choices (model=%s, round=%d)", self.model, round_num)
@@ -424,7 +489,30 @@ class OpenAICompatibleAgent(BaseAgent):
                     "content": result,
                 })
         else:
-            logger.warning("Tool loop hit MAX_TOOL_ROUNDS=%d (model=%s)", MAX_TOOL_ROUNDS, self.model)
+            stats["hit_round_limit"] = True
+            logger.warning("Tool loop hit max_rounds=%d (model=%s) — forcing synthesis call", _max_rounds, self.model)
+            try:
+                synthesis_kwargs = {
+                    "model": self.model,
+                    "messages": messages + [{"role": "user", "content": "Based on all the search results above, please provide a comprehensive answer."}],
+                    self.max_tokens_param: MAX_TOKENS,
+                }
+                if self.extra_body:
+                    synthesis_kwargs["extra_body"] = self.extra_body
+                response = self.client.chat.completions.create(**synthesis_kwargs)
+                if response.usage:
+                    stats["token_breakdown"]["input"] += getattr(response.usage, "prompt_tokens", 0)
+                    stats["token_breakdown"]["output"] += getattr(response.usage, "completion_tokens", 0)
+                stats["api_calls"] += 1
+            except Exception as e:
+                logger.error("Synthesis call failed (model=%s): %s", self.model, e)
+
+        if not response or not response.choices:
+            stats["answer"] = "Error: no response from model"
+            stats["latency_ms"] = (time.perf_counter() - t0) * 1000
+            yield {"event": "answer", "text": stats["answer"], "sources": []}
+            yield {"event": "done", "stats": stats}
+            return
 
         stats["answer"] = response.choices[0].message.content or ""
         total_in = stats["token_breakdown"]["input"]
@@ -470,16 +558,18 @@ class OpenAIResponsesAgent(BaseAgent):
         super().__init__(model, system_prompt)
         self.client = client
 
-    def stream(self, question: str) -> Generator[dict, None, None]:
+    def stream(self, question: str, max_rounds: int = None) -> Generator[dict, None, None]:
         stats = _empty_stats(self.model)
         t0 = time.perf_counter()
         previous_response_id = None
         current_input = question
         response = None
         search_num = 0
+        _max_rounds = max_rounds if max_rounds is not None else MAX_TOOL_ROUNDS
 
-        for round_num in range(MAX_TOOL_ROUNDS):
+        for round_num in range(_max_rounds):
             try:
+                t_connect = time.perf_counter()
                 response = self.client.responses.create(
                     model=self.model,
                     instructions=self.system_prompt,
@@ -487,6 +577,8 @@ class OpenAIResponsesAgent(BaseAgent):
                     tools=[TOOL_SCHEMA_RESPONSES],
                     previous_response_id=previous_response_id,
                 )
+                if round_num == 0:
+                    stats["connect_ms"] = round((time.perf_counter() - t_connect) * 1000)
             except Exception as e:
                 logger.error("API call failed (model=%s, round=%d): %s", self.model, round_num, e)
                 stats["answer"] = f"Error: {e}"
@@ -499,6 +591,8 @@ class OpenAIResponsesAgent(BaseAgent):
                 stats["token_breakdown"]["input"] += getattr(response.usage, "input_tokens", 0)
                 stats["token_breakdown"]["output"] += getattr(response.usage, "output_tokens", 0)
             stats["api_calls"] += 1
+            if round_num == 0:
+                stats["model_confirmed"] = getattr(response, "model", None)
             previous_response_id = response.id
 
             function_calls = [
@@ -577,11 +671,43 @@ class OpenAIResponsesAgent(BaseAgent):
 
             current_input = tool_outputs
         else:
-            logger.warning("Tool loop hit MAX_TOOL_ROUNDS=%d (model=%s)", MAX_TOOL_ROUNDS, self.model)
+            logger.warning("Tool loop hit max_rounds=%d (model=%s) — forcing synthesis call", _max_rounds, self.model)
+            try:
+                # current_input holds pending tool outputs from the last round — submit them
+                # to close the open function calls, then ask for a synthesis with no tools.
+                # Step 1: close the pending tool calls from the last round.
+                close_response = self.client.responses.create(
+                    model=self.model,
+                    instructions=self.system_prompt,
+                    input=current_input,
+                    previous_response_id=previous_response_id,
+                )
+                if close_response.usage:
+                    stats["token_breakdown"]["input"] += getattr(close_response.usage, "input_tokens", 0)
+                    stats["token_breakdown"]["output"] += getattr(close_response.usage, "output_tokens", 0)
+                stats["api_calls"] += 1
+                previous_response_id = close_response.id
+                # Step 2: always ask for an explicit synthesis — the close step only
+                # acknowledges tool outputs and does not produce a text answer.
+                response = self.client.responses.create(
+                    model=self.model,
+                    instructions=self.system_prompt,
+                    input="You have reached the search limit. Synthesize a comprehensive answer from all search results gathered so far.",
+                    previous_response_id=previous_response_id,
+                )
+                if response.usage:
+                    stats["token_breakdown"]["input"] += getattr(response.usage, "input_tokens", 0)
+                    stats["token_breakdown"]["output"] += getattr(response.usage, "output_tokens", 0)
+                stats["api_calls"] += 1
+            except Exception as e:
+                logger.error("Synthesis call failed (model=%s): %s", self.model, e)
 
         # Extract answer from Responses API output structure
+        output_types = [getattr(i, "type", None) for i in response.output] if response else []
+        logger.info("Synthesis response output types (model=%s): %s", self.model, output_types)
+        # GPT-5.5 (reasoning model) emits multiple reasoning/message pairs — pick the last message.
         message_item = next(
-            (item for item in response.output if getattr(item, "type", None) == "message"),
+            (item for item in reversed(response.output) if getattr(item, "type", None) == "message"),
             None,
         ) if response else None
 
@@ -592,6 +718,9 @@ class OpenAIResponsesAgent(BaseAgent):
                 None,
             )
             stats["answer"] = text_item.text if text_item else ""
+            logger.info("Synthesis answer length (model=%s): %d chars", self.model, len(stats["answer"]))
+        else:
+            logger.warning("No message item in synthesis response (model=%s), output_types=%s", self.model, output_types)
 
         total_in = stats["token_breakdown"]["input"]
         total_out = stats["token_breakdown"]["output"]

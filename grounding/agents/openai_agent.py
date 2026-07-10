@@ -35,20 +35,25 @@ Native search paths:
     Both return the same stats dict shape.
 """
 
+import json
 import os
 import time
 
 from openai import OpenAI
 
-from base_agent import BaseAgent, OpenAICompatibleAgent, OpenAIResponsesAgent, _empty_stats
-from search_tool import get_system_prompt, MAX_TOKENS, inject_citations_at_positions, is_verbose
+from base_agent import BaseAgent, OpenAICompatibleAgent, OpenAIResponsesAgent, _empty_stats, _get_agent_default_model
+from search_tool import get_system_prompt, MAX_TOKENS, MAX_TOOL_ROUNDS, NATIVE_SEARCH_BASELINE_TOKENS, TOOL_SCHEMA, inject_citations_at_positions, make_progress_reporter, make_elapsed_timer, extract_urls, execute_search
 
-# Pinned model versions:
-#   "gpt-5.4"        — latest flagship (recommended)
-#   "gpt-5.4-mini"   — balanced cost/performance
-#   "gpt-5.4-nano"   — fastest, lowest cost
-#   "gpt-4.1"        — previous gen, still in API
-DEFAULT_MODEL = "gpt-5.4"
+# Default model comes from pricing.json (agent_default: true for provider "openai").
+# To change the default, update pricing.json — do not edit this line directly.
+# Available models: "gpt-5.4" (flagship), "gpt-5.4-mini" (balanced),
+#                   "gpt-5.4-nano" (fastest), "gpt-4.1" (prev gen)
+DEFAULT_MODEL = _get_agent_default_model("openai", fallback="gpt-5.4")
+
+# Per-model round caps. None = use the global MAX_TOOL_ROUNDS from search_tool.
+_MODEL_MAX_ROUNDS = {
+    "gpt-5.5": 6,
+}
 
 
 class OpenAIAgent(BaseAgent):
@@ -57,6 +62,9 @@ class OpenAIAgent(BaseAgent):
     Selects Responses API or chat.completions at construction time via
     force_chat_completions. Both YDC paths and native search paths are
     available as methods on this single class.
+
+    Return value of ask() and run_native_search(): see base_agent._empty_stats()
+    for the full field-by-field reference.
 
     Subclass this to build your own GPT-based grounded agent:
 
@@ -82,13 +90,18 @@ class OpenAIAgent(BaseAgent):
                 "Pass api_key= or export OPENAI_API_KEY."
             )
         self._api_key = resolved_key
-        self._client = OpenAI(api_key=resolved_key)
+        self._client = OpenAI(api_key=resolved_key, timeout=120.0)
         cls = OpenAICompatibleAgent if force_chat_completions else OpenAIResponsesAgent
         self._impl = cls(client=self._client, model=model)
+        self._max_rounds = _MODEL_MAX_ROUNDS.get(model)  # None = use global default
         super().__init__(model=model)
 
-    def stream(self, question: str):
-        yield from self._impl.stream(question)
+    def stream(self, question: str, max_rounds: int = None):
+        _rounds = max_rounds if max_rounds is not None else self._max_rounds
+        if _rounds is not None:
+            yield from self._impl.stream(question, max_rounds=_rounds)
+        else:
+            yield from self._impl.stream(question)
 
     def run_native_search(
         self,
@@ -107,13 +120,21 @@ class OpenAIAgent(BaseAgent):
             native_search_tool:      Tool config for the Responses API path.
             chat_native_search_tool: Tool config for the chat.completions path.
         """
-        if path == "chat":
-            return self._run_native_chat(
-                question, system_prompt, on_progress, chat_native_search_tool
+        t0 = time.perf_counter()
+        try:
+            if path == "chat":
+                return self._run_native_chat(
+                    question, system_prompt, on_progress, chat_native_search_tool
+                )
+            return self._run_native_responses(
+                question, system_prompt, on_progress, native_search_tool
             )
-        return self._run_native_responses(
-            question, system_prompt, on_progress, native_search_tool
-        )
+        except Exception as e:
+            stats = _empty_stats(self.model)
+            stats["interface"] = "native_chat" if path == "chat" else "native_responses"
+            stats["answer"] = f"Error: {e}"
+            stats["latency_ms"] = (time.perf_counter() - t0) * 1000
+            return stats
 
     def _run_native_responses(
         self,
@@ -124,30 +145,22 @@ class OpenAIAgent(BaseAgent):
     ) -> dict:
         """Responses API path — single call, server-side search loop."""
         tool = native_search_tool or {"type": "web_search", "search_context_size": "medium"}
-        prompt = system_prompt or get_system_prompt()
+        prompt = system_prompt or get_system_prompt(self.model)
         stats = _empty_stats(self.model)
         stats["interface"] = "native_responses"
-        verbose = is_verbose()
-
-        def _notify(msg):
-            if verbose:
-                print(f"  [Native] {msg}")
-            if on_progress:
-                on_progress(msg)
-
-        t0 = time.perf_counter()
-
-        def _elapsed():
-            return f"{(time.perf_counter() - t0):.1f}s"
+        _notify = make_progress_reporter("Native", on_progress)
+        t0, _elapsed = make_elapsed_timer()
 
         _notify(f"Starting request... ({_elapsed()})")
 
+        t_connect = time.perf_counter()
         response = self._client.responses.create(
             model=self.model,
             instructions=prompt,
             tools=[tool],
             input=question,
         )
+        stats["connect_ms"] = round((time.perf_counter() - t_connect) * 1000)
 
         stats["model_confirmed"] = getattr(response, "model", None)
         stats["latency_ms"] = (time.perf_counter() - t0) * 1000
@@ -193,8 +206,8 @@ class OpenAIAgent(BaseAgent):
                         text = inject_citations_at_positions(text, insertions)
                         stats["answer"] += text
 
-        if stats["search_calls"] > 0 and stats["token_breakdown"]["input"] > 200:
-            stats["token_breakdown"]["search_context"] = stats["token_breakdown"]["input"] - 200
+        if stats["search_calls"] > 0 and stats["token_breakdown"]["input"] > NATIVE_SEARCH_BASELINE_TOKENS:
+            stats["token_breakdown"]["search_context"] = stats["token_breakdown"]["input"] - NATIVE_SEARCH_BASELINE_TOKENS
 
         _notify(f"Complete — {stats['latency_ms']:.0f}ms total ({_elapsed()})")
         return stats
@@ -204,60 +217,88 @@ class OpenAIAgent(BaseAgent):
         question: str,
         system_prompt: str = None,
         on_progress=None,
-        chat_native_search_tool: dict = None,
+        chat_native_search_tool: dict = None,  # unused, kept for signature compat
     ) -> dict:
-        """chat.completions path — web_search_preview tool, single call."""
-        tool = chat_native_search_tool or {"type": "web_search_preview"}
-        prompt = system_prompt or get_system_prompt()
+        """YDC via chat.completions — client-managed multi-round tool loop.
+
+        Uses {"type": "function"} schema (valid for chat.completions).
+        web_search_preview is Responses-API-only and is rejected with 400 here.
+        """
+
+
+        prompt = system_prompt or get_system_prompt(self.model)
         stats = _empty_stats(self.model)
-        stats["interface"] = "native_chat"
-        verbose = is_verbose()
+        stats["interface"] = "ydc"
+        _notify = make_progress_reporter("YDC/Chat", on_progress)
+        t0, _elapsed = make_elapsed_timer()
 
-        def _notify(msg):
-            if verbose:
-                print(f"  [Native/Chat] {msg}")
-            if on_progress:
-                on_progress(msg)
+        messages = [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": question},
+        ]
+        baseline_input = 0
 
-        t0 = time.perf_counter()
+        for round_num in range(MAX_TOOL_ROUNDS):
+            _notify(f"Round {round_num + 1} ({_elapsed()})")
+            t_connect = time.perf_counter()
+            response = self._client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                tools=[TOOL_SCHEMA],
+                max_completion_tokens=MAX_TOKENS,
+            )
+            if round_num == 0:
+                stats["connect_ms"] = round((time.perf_counter() - t_connect) * 1000)
+            stats["api_calls"] += 1
 
-        def _elapsed():
-            return f"{(time.perf_counter() - t0):.1f}s"
+            usage = response.usage
+            call_input = getattr(usage, "prompt_tokens", 0) if usage else 0
+            call_output = getattr(usage, "completion_tokens", 0) if usage else 0
+            stats["tokens_used"] += call_input + call_output
+            stats["token_breakdown"]["input"] += call_input
+            stats["token_breakdown"]["output"] += call_output
+            if round_num == 0:
+                baseline_input = call_input
 
-        _notify(f"Starting request... ({_elapsed()})")
+            if round_num == 0 and response.model:
+                stats["model_confirmed"] = response.model
 
-        response = self._client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": question},
-            ],
-            tools=[tool],
-        )
+            choice = response.choices[0]
+            tool_calls = getattr(choice.message, "tool_calls", None) or []
+
+            if not tool_calls or choice.finish_reason == "stop":
+                stats["answer"] = choice.message.content or ""
+                break
+
+            messages.append({
+                "role": "assistant",
+                "content": choice.message.content,
+                "tool_calls": [
+                    {"id": tc.id, "type": "function",
+                     "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                    for tc in tool_calls
+                ],
+            })
+
+            for tc in tool_calls:
+                if tc.function.name != "web_search":
+                    continue
+                tool_args = json.loads(tc.function.arguments or "{}")
+                if len(tool_args.get("query", "")) > 200:
+                    tool_args["query"] = tool_args["query"][:200]
+                stats["search_calls"] += 1
+                _notify(f"Search {stats['search_calls']} ({_elapsed()})")
+                result = execute_search(tool_args)
+                for url in extract_urls(result):
+                    if url not in stats["sources"]:
+                        stats["sources"].append(url)
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+        else:
+            stats["hit_round_limit"] = True
 
         stats["latency_ms"] = (time.perf_counter() - t0) * 1000
-        stats["api_calls"] = 1
-
-        if response.model:
-            stats["model_confirmed"] = response.model
-
-        if response.usage:
-            stats["token_breakdown"]["input"] = getattr(response.usage, "prompt_tokens", 0)
-            stats["token_breakdown"]["output"] = getattr(response.usage, "completion_tokens", 0)
-        stats["tokens_used"] = stats["token_breakdown"]["input"] + stats["token_breakdown"]["output"]
-
-        if response.choices:
-            choice = response.choices[0]
-            stats["answer"] = (choice.message.content or "")
-
-            # Count web search tool calls reported in the response
-            for tc in getattr(choice.message, "tool_calls", []) or []:
-                if getattr(tc.function, "name", "") in ("web_search", "web_search_preview"):
-                    stats["search_calls"] += 1
-                    _notify(f"Search {stats['search_calls']} ({_elapsed()})")
-
-        if stats["token_breakdown"]["input"] > 200:
-            stats["token_breakdown"]["search_context"] = stats["token_breakdown"]["input"] - 200
+        if stats["token_breakdown"]["input"] > baseline_input:
+            stats["token_breakdown"]["search_context"] = stats["token_breakdown"]["input"] - baseline_input
 
         _notify(f"Complete — {stats['latency_ms']:.0f}ms total ({_elapsed()})")
         return stats

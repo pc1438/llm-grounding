@@ -12,7 +12,17 @@ Proves two things:
 | Key | Model | Native Search | Judge |
 |-----|-------|---------------|-------|
 | `claude` | Claude Sonnet 4.6 | Anthropic Web Search ($10/1k + input token billing) | GPT-5.4 judges Claude |
-| `openai` | GPT-5.4 | OpenAI Web Search via Responses API ($10/1k + search content tokens at model rates) | Claude judges GPT |
+| `claude-opus` | Claude Opus 4.8 | Anthropic Web Search | GPT-5.4 judges Claude |
+| `gpt5.4` | GPT-5.4 | OpenAI Web Search via Responses API ($10/1k + search content tokens) | Claude judges GPT |
+| `gpt5.5` | GPT-5.5 | OpenAI Web Search via Responses API | Claude judges GPT |
+| `qwen` | Qwen3.7 Max (Alibaba) | Experimental native search | Claude judges Qwen |
+| `qwen-openrouter` | Qwen3.7 Max (OpenRouter) | You.com only | Claude judges Qwen |
+| `kimi` | Kimi K2.6 (Moonshot) | Experimental native search | Claude judges Kimi |
+| `kimi-openrouter` | Kimi K2.6 (OpenRouter) | You.com only | Claude judges Kimi |
+| `llama` | Llama 4 Maverick (OpenRouter) | You.com only | Claude judges Llama |
+| `llama-scout` | Llama 4 Scout (OpenRouter) | You.com only | Claude judges Llama |
+| `deepseek` | DeepSeek V3.1 (OpenRouter) | You.com only | Claude judges DeepSeek |
+| `glm-5` | GLM-5 (Z.ai via OpenRouter) | You.com only | Claude judges GLM |
 
 The judge is always a different LLM than the one being tested (cross-model) to avoid self-grading bias. Answers are randomly assigned to positions A/B so the judge can't infer which system produced which answer.
 
@@ -25,14 +35,17 @@ source ../grounding/venv/bin/activate
 # Claude comparison + GPT judge
 python compare.py claude "Who won the 2026 men's hockey Olympic gold?"
 
-# GPT comparison + Claude judge
-python compare.py openai "What happened in tech news today?"
+# GPT-5.4 comparison + Claude judge
+python compare.py gpt5.4 "What happened in tech news today?"
+
+# Kimi comparison
+python compare.py kimi "Latest NVIDIA earnings"
 
 # With full logging
 python compare.py claude --verbose "Latest NVIDIA earnings"
 
 # Skip judge evaluation (faster)
-python compare.py openai --no-judge "current S&P 500 price"
+python compare.py gpt5.5 --no-judge "current S&P 500 price"
 ```
 
 ## How It Works

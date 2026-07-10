@@ -9,7 +9,7 @@ Most teams building search-grounded AI systems face the same set of questions:
 - What does grounding actually cost — inference tokens, search fees, combined?
 - How does grounding quality vary across providers?
 
-This repo gives you working code to run those experiments yourself, across five LLMs, with a blind cross-model judge and full cost accounting.
+This repo gives you working code to run those experiments yourself, across thirteen LLMs, with a blind cross-model judge and full cost accounting.
 
 ## What's Here
 
@@ -17,30 +17,41 @@ This repo gives you working code to run those experiments yourself, across five 
 llm-grounding/
 ├── grounding/      ← Ground any LLM with You.com Search (library + CLI)
 ├── comparison/     ← You.com Search vs. native web search: cost + quality
-├── app/            ← Web UI: interactive trace viewer + comparison dashboard
+├── app/            ← Web UI: Playground, Compare, Multi-model, About tabs
 ├── decisions/      ← Decision logs: what we tested, what we found, why
 └── README.md       ← You are here
 ```
 
-**grounding/** is the core library. It adds real-time web search to Claude, GPT-5.4, Qwen, Kimi, and Llama via a single `agent.ask()` interface. Importable or runnable as a CLI — no UI required.
+**grounding/** is the core library. It adds real-time web search to any supported LLM via a single `agent.stream()` interface. Importable or runnable as a CLI — no UI required. `agent_pool.py` provides a shared, thread-safe agent instance cache used by both the UI server and the comparison module.
 
 **comparison/** runs the same query through two paths — LLM + You.com Search vs. LLM + native web search — measures token usage and cost on both sides, then uses a cross-model blind judge to score answer quality. The data it produces is the basis for grounding architecture decisions.
 
-**app/** is a thin browser UI wrapping both modules. Three tabs: About (architecture + decision context), Grounding (live tool-use trace viewer), Comparison (side-by-side cost and quality dashboard).
+**app/** is a thin HTTP + SSE server wrapping both modules. Four tabs:
+- **About** — architecture overview, configuration reference, tunable parameters
+- **Playground** — live tool-use trace viewer with full token, cost, and timing breakdown
+- **Compare** — side-by-side You.com vs. native search: tokens, cost, latency, quality score
+- **Multi-model** — run the same query across multiple models simultaneously and compare results
 
 **decisions/** is the research log: each file documents a question we investigated, the experiment we ran, and the decision we made. Not academic — these are the actual findings that shaped the architecture here.
 
 ## Supported Models
 
-| Key | Model | Vendor | Grounding | Comparison |
-|-----|-------|--------|-----------|------------|
+| Key | Model | Vendor | Playground | Comparison |
+|-----|-------|--------|------------|------------|
 | `claude` | Claude Sonnet 4.6 | Anthropic | Yes | Yes |
-| `gpt` | GPT-5.4 | OpenAI | Yes | Yes |
-| `qwen` | Qwen Plus | Alibaba (DashScope) | Yes | Yes |
-| `kimi` | Kimi K2.5 | Moonshot AI | Yes | Yes |
-| `llama` | Llama 4 Maverick | Meta (via Together AI) | Yes | — |
+| `claude-opus` | Claude Opus 4.8 | Anthropic | Yes | Yes |
+| `gpt5.4` | GPT-5.4 | OpenAI | Yes | Yes |
+| `gpt5.5` | GPT-5.5 | OpenAI | Yes | Yes |
+| `qwen` | Qwen3.7 Max | Alibaba Cloud | Yes | Yes |
+| `qwen-openrouter` | Qwen3.7 Max | Alibaba (via OpenRouter) | Yes | Yes |
+| `kimi` | Kimi K2.6 | Moonshot AI | Yes | Yes |
+| `kimi-openrouter` | Kimi K2.6 | Moonshot AI (via OpenRouter) | Yes | Yes |
+| `llama` | Llama 4 Maverick | Meta (via OpenRouter) | Yes | Yes |
+| `llama-scout` | Llama 4 Scout | Meta (via OpenRouter) | Yes | Yes |
+| `deepseek` | DeepSeek V3.1 | DeepSeek (via OpenRouter) | Yes | Yes |
+| `glm-5` | GLM-5 | Z.ai (via OpenRouter) | Yes | Yes |
 
-Native web search comparison requires provider support. Claude and GPT have production web search tools. Qwen and Kimi have experimental native search that we test here. Llama has no native search.
+Native web search comparison requires provider support. Claude and GPT have production web search tools. Qwen and Kimi have experimental native search. Llama, DeepSeek, GLM-5, and Gemma have no native search and are You.com-only.
 
 ## Quick Start
 
@@ -61,27 +72,28 @@ cp grounding/.env.example grounding/env.txt
 ```
 YDC_API_KEY=your-key           # Required — you.com/platform ($100 free credits)
 ANTHROPIC_API_KEY=your-key     # For Claude
-OPENAI_API_KEY=your-key        # For GPT-5.4
-DASHSCOPE_API_KEY=your-key     # For Qwen
-MOONSHOT_API_KEY=your-key      # For Kimi
-TOGETHER_API_KEY=your-key      # For Llama
+OPENAI_API_KEY=your-key        # For GPT-5.4, GPT-5.5
+DASHSCOPE_API_KEY=your-key     # For Qwen (direct)
+MOONSHOT_API_KEY=your-key      # For Kimi (direct)
+OPENROUTER_API_KEY=your-key    # For Llama, DeepSeek, GLM-5, and *-openrouter variants
 ```
 
 ### 3. Ground an LLM with web search
 
 ```bash
 cd grounding
-python run.py claude "What happened in tech news today?"
-python run.py gpt    "Who won the 2026 Olympic hockey gold?"
-python run.py kimi   "Latest NVIDIA earnings"
+python run.py claude    "What happened in tech news today?"
+python run.py gpt5.4   "Who won the 2026 Olympic hockey gold?"
+python run.py kimi     "Latest NVIDIA earnings"
+python run.py deepseek "Compare Tesla and BYD delivery numbers"
 ```
 
 ### 4. Compare You.com vs. native search
 
 ```bash
 cd comparison
-python compare.py claude "What happened in tech news today?"
-python compare.py openai "Current S&P 500 price"
+python compare.py claude  "What happened in tech news today?"
+python compare.py gpt5.4  "Current S&P 500 price"
 ```
 
 ### 5. Launch the web UI
@@ -121,7 +133,7 @@ This repo gives you a working benchmark harness (`comparison/benchmark_runner.py
 
 ## Architecture
 
-The codebase is layered: CLI modules are standalone and importable; the UI is a thin HTTP wrapper.
+The codebase is layered: CLI modules are standalone and importable; the UI is a thin HTTP + SSE wrapper.
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -134,15 +146,19 @@ The codebase is layered: CLI modules are standalone and importable; the UI is a 
     └──────┬──────┘    └──────┬──────┘
            │                  │
     ┌──────▼──────────────────▼───────┐
-    │        grounding/search_tool.py │         ← You.com Search API
-    │        grounding/base_agent.py  │         ← tool-use loop (all providers)
-    │        grounding/agents/*.py    │         ← per-provider clients
+    │     grounding/agent_pool.py     │         ← shared agent cache (thread-safe)
+    ├─────────────────────────────────┤
+    │     grounding/search_tool.py    │         ← You.com Search API
+    │     grounding/base_agent.py     │         ← tool-use loop (all providers)
+    │     grounding/agents/*.py       │         ← per-provider clients
     └─────────────────────────────────┘
 ```
 
 **Grounding flow:** User question → LLM decides to search → You.com returns results → LLM synthesizes a cited answer.
 
 **Comparison flow:** Same query runs in parallel through both paths → cross-model blind judge scores completeness, relevance, specificity, citation quality → cost breakdown.
+
+**Agent caching:** `agent_pool.py` maintains a shared, thread-safe cache of agent instances. Both `run.py` and `compare.py` pull from this pool — avoiding duplicate instantiation and TCP/TLS handshake overhead across parallel requests. The server pre-warms all agents at startup.
 
 ## Search Cost Reference
 

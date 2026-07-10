@@ -82,11 +82,36 @@ SYSTEM_PROMPT = (
     "honestly rather than guessing."
 )
 
+# TUNING LEVER: GPT-5.5 requires explicit search tool coaching that other models
+# don't need (they handle include_domains/livecrawl correctly without guidance).
+# If other models regress on tool usage in the future, consider promoting some of
+# these rules back into SYSTEM_PROMPT, or adding per-model variants here.
+_GPT_55_SEARCH_RULES = (
+    "\n\nIMPORTANT — search query rules:\n"
+    "- Write plain natural-language queries only. Do NOT embed Google-style operators "
+    "in the query string (site:, filetype:, inurl:, intitle:, OR, AND, quoted phrases, "
+    "etc.) — they are not supported and will cause the search to fail.\n"
+    "- Use the include_domains parameter freely when you want results from specific "
+    "sources (e.g. include_domains='reuters.com,bloomberg.com'). This is the correct "
+    "and preferred way to scope a search — use it often.\n"
+    "- Use exclude_domains to filter out low-quality sources.\n"
+    "- Set livecrawl=true for questions requiring detailed, structured data (tables, "
+    "specs, financials, statistics) where snippets alone are insufficient. Use it "
+    "selectively on the most relevant sources."
+)
+
 MAX_TOKENS = 4096       # Default max output tokens per LLM call
 MAX_TOOL_ROUNDS = 15    # Max LLM ↔ tool-use round-trips before we force a final answer
 
+# Estimated baseline input tokens (system prompt + user query) for single-call native
+# search paths where the model handles search internally and returns one response.
+# Multi-round paths (YDC, chat.completions) measure this exactly from round 0.
+# Single-call paths (Anthropic native, OpenAI Responses native) cannot measure it
+# because there is no pre-search round — this constant is used as the approximation.
+NATIVE_SEARCH_BASELINE_TOKENS = 300
 
-def get_system_prompt() -> str:
+
+def get_system_prompt(model: str = "") -> str:
     """Return the system prompt with the current date/time appended.
 
     This gives the LLM temporal context so it can interpret relative
@@ -96,11 +121,15 @@ def get_system_prompt() -> str:
     All runtime callers should use this instead of the static SYSTEM_PROMPT.
     The static constant is kept for imports that need the base text
     (e.g., A/B testing, display).
+
+    Args:
+        model: The model name. GPT-5.5 gets additional search tool coaching.
     """
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
     timestamp = now.strftime("%A, %B %d, %Y at %H:%M UTC")
-    return f"{SYSTEM_PROMPT}\n\nCurrent date and time: {timestamp}"
+    extra = _GPT_55_SEARCH_RULES if "gpt-5.5" in model.lower() else ""
+    return f"{SYSTEM_PROMPT}{extra}\n\nCurrent date and time: {timestamp}"
 
 
 # ─── Tool schema (OpenAI-compatible format) ──────────────────────────────────
@@ -124,7 +153,12 @@ TOOL_SCHEMA = {
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "The search query. Be specific and descriptive.",
+                    "description": (
+                        "Plain natural-language search query. Be specific and descriptive. "
+                        "Do NOT use Google operators (site:, filetype:, inurl:, OR, AND, etc.) — "
+                        "they are unsupported and will cause errors. To restrict to specific "
+                        "domains use the include_domains parameter instead."
+                    ),
                 },
                 "count": {
                     "type": "integer",
@@ -150,11 +184,19 @@ TOOL_SCHEMA = {
                 },
                 "include_domains": {
                     "type": "string",
-                    "description": "Comma-separated list of domains to restrict results to.",
+                    "description": (
+                        "Comma-separated list of domains to restrict results to "
+                        "(e.g. 'reuters.com,bloomberg.com'). Use this instead of "
+                        "site: in the query string."
+                    ),
                 },
                 "exclude_domains": {
                     "type": "string",
-                    "description": "Comma-separated list of domains to exclude from results.",
+                    "description": (
+                        "Comma-separated list of domains to exclude from results "
+                        "(e.g. 'reddit.com,quora.com'). Use this instead of "
+                        "-site: in the query string."
+                    ),
                 },
             },
             "required": ["query"],
@@ -303,6 +345,12 @@ def execute_search(
     livecrawl = tool_args.get("livecrawl", False)
     freshness = tool_args.get("freshness")
     include_domains = tool_args.get("include_domains")
+
+    extras = []
+    if livecrawl: extras.append("livecrawl")
+    if freshness: extras.append(f"freshness={freshness}")
+    if include_domains: extras.append(f"include_domains={include_domains}")
+    logger.info("YDC search: %r count=%d %s", query, count, " ".join(extras))
     exclude_domains = tool_args.get("exclude_domains")
 
     params: dict = {"query": query, "count": count}
@@ -332,7 +380,13 @@ def execute_search(
         return f"Search failed: request timed out after {SEARCH_TIMEOUT_SECONDS}s"
     except requests.HTTPError as e:
         status = e.response.status_code if e.response is not None else "unknown"
-        logger.error("You.com Search API returned HTTP %s for query: %s", status, query)
+        body = ""
+        if e.response is not None:
+            try:
+                body = e.response.json()
+            except Exception:
+                body = e.response.text[:300]
+        logger.error("You.com Search API returned HTTP %s for query: %r — %s", status, query, body)
         return f"Search failed: HTTP {status}"
     except requests.RequestException as e:
         logger.error("You.com Search API request failed: %s", e)
@@ -406,6 +460,25 @@ def inject_citations(text: str, sources: list) -> str:
     for i, url in enumerate(sources, 1):
         text = re.sub(rf'\[{i}\]', f'[[{i}]]({url})', text)
     return text
+
+
+def make_progress_reporter(prefix: str, on_progress=None):
+    """Return a _notify(msg) closure for agent native-search progress reporting."""
+    verbose = is_verbose()
+    def _notify(msg):
+        if verbose:
+            print(f"  [{prefix}] {msg}")
+        if on_progress:
+            on_progress(msg)
+    return _notify
+
+
+def make_elapsed_timer():
+    """Return (t0, _elapsed) where _elapsed() formats seconds since t0 as a string."""
+    t0 = time.perf_counter()
+    def _elapsed():
+        return f"{(time.perf_counter() - t0):.1f}s"
+    return t0, _elapsed
 
 
 # ─── Quick self-test ─────────────────────────────────────────────────────────

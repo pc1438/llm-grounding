@@ -24,14 +24,14 @@ import time
 
 from anthropic import Anthropic
 
-from base_agent import AnthropicAgent, _empty_stats
-from search_tool import get_system_prompt, MAX_TOKENS, inject_citations_at_positions, is_verbose
+from base_agent import AnthropicAgent, _empty_stats, _get_agent_default_model
+from search_tool import get_system_prompt, MAX_TOKENS, NATIVE_SEARCH_BASELINE_TOKENS, inject_citations_at_positions, make_progress_reporter, make_elapsed_timer
 
-# Pinned model versions:
-#   "claude-opus-4-8"              — most capable, highest cost
-#   "claude-sonnet-4-6"            — balanced (recommended)
-#   "claude-haiku-4-5-20251001"    — fastest, lowest cost
-DEFAULT_MODEL = "claude-sonnet-4-6"
+# Default model comes from pricing.json (agent_default: true for provider "anthropic").
+# To change the default, update pricing.json — do not edit this line directly.
+# Available models: "claude-opus-4-8" (most capable), "claude-sonnet-4-6" (balanced),
+#                   "claude-haiku-4-5-20251001" (fastest)
+DEFAULT_MODEL = _get_agent_default_model("anthropic", fallback="claude-sonnet-4-6")
 
 
 class ClaudeAgent(AnthropicAgent):
@@ -40,6 +40,9 @@ class ClaudeAgent(AnthropicAgent):
     Claude uses Anthropic's tool_use format (not OpenAI function calling),
     which is why this inherits from AnthropicAgent instead of
     OpenAICompatibleAgent.
+
+    Return value of ask() and run_native_search(): see base_agent._empty_stats()
+    for the full field-by-field reference.
     """
 
     def __init__(
@@ -78,25 +81,16 @@ class ClaudeAgent(AnthropicAgent):
         tool = native_search_tool or {"type": "web_search_20260209", "name": "web_search"}
         prompt = system_prompt or get_system_prompt()
         stats = _empty_stats(self.model)
-        stats["interface"] = "native_responses"
-        verbose = is_verbose()
-
-        def _notify(msg):
-            if verbose:
-                print(f"  [Native] {msg}")
-            if on_progress:
-                on_progress(msg)
-
+        stats["interface"] = "native_messages"
+        _notify = make_progress_reporter("Native", on_progress)
         messages = [{"role": "user", "content": question}]
-        t0 = time.perf_counter()
-
-        def _elapsed():
-            return f"{(time.perf_counter() - t0):.1f}s"
+        t0, _elapsed = make_elapsed_timer()
 
         _notify(f"Starting stream... ({_elapsed()})")
 
         source_index_map: dict[str, int] = {}
 
+        t_connect = time.perf_counter()
         with self.client.messages.stream(
             model=self.model,
             system=prompt,
@@ -104,7 +98,11 @@ class ClaudeAgent(AnthropicAgent):
             tools=[tool],
             messages=messages,
         ) as stream:
+            _connect_recorded = False
             for event in stream:
+                if not _connect_recorded:
+                    stats["connect_ms"] = round((time.perf_counter() - t_connect) * 1000)
+                    _connect_recorded = True
                 etype = getattr(event, "type", "")
                 if etype == "content_block_start":
                     block = getattr(event, "content_block", None)
@@ -162,8 +160,8 @@ class ClaudeAgent(AnthropicAgent):
                     text = inject_citations_at_positions(text, insertions)
                 stats["answer"] += text
 
-        if stats["token_breakdown"]["search_context"] == 0 and stats["token_breakdown"]["input"] > 500:
-            stats["token_breakdown"]["search_context"] = stats["token_breakdown"]["input"] - 400
+        if stats["token_breakdown"]["search_context"] == 0 and stats["token_breakdown"]["input"] > NATIVE_SEARCH_BASELINE_TOKENS:
+            stats["token_breakdown"]["search_context"] = stats["token_breakdown"]["input"] - NATIVE_SEARCH_BASELINE_TOKENS
 
         _notify(f"Complete — {stats['latency_ms']:.0f}ms total ({_elapsed()})")
         return stats

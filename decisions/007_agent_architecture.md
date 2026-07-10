@@ -18,14 +18,15 @@ Same logic, three copies. Any change (e.g. switching GPT to the Responses API) h
 
 ---
 
-## Decision: 4 Layers, Clear Ownership
+## Decision: 5 Layers, Clear Ownership
 
 ```
 search_tool.py          — You.com search execution + tool schemas
 base_agent.py           — Loop implementations, organized by API shape
 agents/<provider>.py    — Client setup, model defaults, provider quirks
 run.py                  — SSE streaming wrapper only
-compare.py              — Orchestration, judge, file output only
+judge.py                — Blind cross-model evaluation (owns its own clients)
+compare.py              — Orchestration and file output only
 ```
 
 ---
@@ -90,14 +91,27 @@ Thin streaming wrapper. Its only job is:
 
 No loop logic. No API calls. No search execution. If the loop changes, `run.py` doesn't change.
 
-### `compare.py`
-Orchestration only:
-- Runs YDC path and native path (calls `agent.ask()`)
-- Runs the judge
-- Scores and formats results
-- Writes output files
+### `judge.py`
+Self-contained blind cross-model evaluator. Owns:
+- `JUDGE_SYSTEM_PROMPT` — scoring rubric and JSON format spec
+- `run_judge()` — position randomization, API calls, response parsing, verdict mapping
+- Both `Anthropic` and `OpenAI` SDK clients (created internally per call)
 
-No loop logic. Calls agent classes the same way a CLI user would.
+The judge is independent of the grounding agent stack. It creates its own clients
+because it is not part of the search path — it is a separate evaluation capability.
+`compare.py`, `benchmark_runner.py`, and `server.py` all import `run_judge` from here.
+
+Supported judge models: `"openai"` (GPT-5.4) and `"claude"` (Claude Sonnet 4.6).
+Which is used is controlled by the `"judge"` field in `pricing.json` per model —
+cross-model by design (GPT judges Claude results, Claude judges GPT results).
+
+### `compare.py`
+Orchestration and output only:
+- Instantiates provider agent classes (`ClaudeAgent`, `OpenAIAgent`, etc.) and calls `ask()`
+- Calls `run_judge()` from `judge.py`
+- Formats and prints results, writes output files
+
+No loop logic. No client creation. No judge logic. Calls agent classes the same way a CLI user would.
 
 ---
 
@@ -126,27 +140,33 @@ The callback is fire-and-forget. The agent does not wait for acknowledgement. Er
 
 ## The `ask()` Return Dict
 
-All agents return the same shape:
+All agents return the same shape. `base_agent._empty_stats()` is the authoritative
+field-by-field reference — the definition below is illustrative:
 
 ```python
 {
-    "answer":      str,           # final text response
-    "sources":     list[str],     # URLs from search results
-    "tool_calls":  list[dict],    # each search: query, results, latency
-    "model":       str,           # model ID confirmed by API response
-    "tokens_used": int,           # total input + output tokens
+    "answer":          str,    # final text, with [N] citation markers where applicable
+    "sources":         list,   # ordered source URLs cited in the answer
+    "tool_calls":      list,   # YDC search log entries; empty for native search paths
+    "model":           str,    # model ID as passed by the caller
+    "model_confirmed": str,    # model ID as confirmed by the API response (may differ)
+    "interface":       str,    # which path ran: "ydc", "native_responses",
+                               # "native_chat", "not_supported", or INTEGRATION_INTERFACE
+    "tokens_used":     int,    # total tokens consumed (input + output)
     "token_breakdown": {
         "input":          int,
         "output":         int,
-        "search_context": int,    # tokens from accumulated search results
+        "search_context": int, # tokens from accumulated search results (YDC path)
     },
-    "search_calls":  int,
-    "api_calls":     int,
-    "latency_ms":    float,
+    "search_calls":    int,    # number of search round-trips executed
+    "api_calls":       int,    # number of LLM API calls made (>1 for multi-round loops)
+    "latency_ms":      float,  # wall-clock time from first request to final answer
 }
 ```
 
-`compare.py` maps this to its own stats dict for scoring and file output. The shapes are intentionally kept separate — agent dict is the programmatic API, compare stats dict includes comparison-specific fields (path, cost, judge scores).
+`compare.py` maps this to its own stats dict for scoring and file output. The shapes are
+intentionally kept separate — agent dict is the programmatic API, compare stats dict
+includes comparison-specific fields (path, cost, judge scores).
 
 ---
 

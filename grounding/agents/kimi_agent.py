@@ -28,14 +28,13 @@ import time
 
 from openai import OpenAI
 
-from base_agent import OpenAICompatibleAgent, _empty_stats
-from search_tool import get_system_prompt, MAX_TOKENS, is_verbose
+from base_agent import OpenAICompatibleAgent, _empty_stats, _get_agent_default_model
+from search_tool import get_system_prompt, MAX_TOKENS, make_progress_reporter, make_elapsed_timer
 
-# Pinned model versions:
-#   "kimi-k2.5"              — latest, 256k context (recommended)
-#   "kimi-k2-0905-preview"   — previous gen, 256k context
-# NOTE: moonshot-v1-* models were discontinued Jan 2026
-DEFAULT_MODEL = "kimi-k2.5"
+# Default model comes from pricing.json (agent_default: true for provider "kimi").
+# To change the default, update pricing.json — do not edit this line directly.
+# Available models: "kimi-k2.5", "kimi-k2-0905-preview" (prev gen, discontinued)
+DEFAULT_MODEL = _get_agent_default_model("kimi", fallback="kimi-k2.6")
 
 # Moonshot API endpoint options:
 #   api.moonshot.ai/v1   — global endpoint (recommended; used here and in run.py/compare.py)
@@ -49,6 +48,9 @@ class KimiAgent(OpenAICompatibleAgent):
 
     Uses OpenAI-compatible function calling via Moonshot's API.
     Always uses chat.completions — Moonshot's /v1/responses returns 404.
+
+    Return value of ask() and run_native_search(): see base_agent._empty_stats()
+    for the full field-by-field reference.
     """
 
     def __init__(
@@ -66,6 +68,7 @@ class KimiAgent(OpenAICompatibleAgent):
         client = OpenAI(
             api_key=resolved_key,
             base_url="https://api.moonshot.ai/v1",
+            timeout=120.0,
         )
         super().__init__(client=client, model=model)
 
@@ -85,95 +88,93 @@ class KimiAgent(OpenAICompatibleAgent):
         """
         prompt = system_prompt or get_system_prompt()
         stats = _empty_stats(self.model)
-        stats["interface"] = "native_responses"
-        verbose = is_verbose()
-
-        def _notify(msg):
-            if verbose:
-                print(f"  [Native] {msg}")
-            if on_progress:
-                on_progress(msg)
-
+        stats["interface"] = "native_chat"
+        _notify = make_progress_reporter("Native", on_progress)
         kimi_tool = [{"type": "builtin_function", "function": {"name": "$web_search"}}]
         messages = [
             {"role": "system", "content": prompt},
             {"role": "user", "content": question},
         ]
-        t0 = time.perf_counter()
+        t0, _elapsed = make_elapsed_timer()
         baseline_input = 0
         choice = None
 
-        def _elapsed():
-            return f"{(time.perf_counter() - t0):.1f}s"
-
         _notify(f"Starting request... ({_elapsed()})")
 
-        from search_tool import MAX_TOOL_ROUNDS
-        for round_num in range(MAX_TOOL_ROUNDS):
-            _notify(f"LLM round {round_num + 1}... ({_elapsed()})")
+        try:
+            from search_tool import MAX_TOOL_ROUNDS
+            for round_num in range(MAX_TOOL_ROUNDS):
+                _notify(f"LLM round {round_num + 1}... ({_elapsed()})")
 
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                tools=kimi_tool,
-                max_completion_tokens=MAX_TOKENS,
-                extra_body={"thinking": {"type": "disabled"}},
-            )
+                t_connect = time.perf_counter()
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    tools=kimi_tool,
+                    max_completion_tokens=MAX_TOKENS,
+                    extra_body={"thinking": {"type": "disabled"}},
+                )
 
-            if response.usage:
-                call_input = getattr(response.usage, "prompt_tokens", 0)
-                call_output = getattr(response.usage, "completion_tokens", 0)
-            else:
-                call_input = call_output = 0
+                if response.usage:
+                    call_input = getattr(response.usage, "prompt_tokens", 0)
+                    call_output = getattr(response.usage, "completion_tokens", 0)
+                else:
+                    call_input = call_output = 0
 
-            stats["token_breakdown"]["input"] += call_input
-            stats["token_breakdown"]["output"] += call_output
-            stats["api_calls"] += 1
+                stats["token_breakdown"]["input"] += call_input
+                stats["token_breakdown"]["output"] += call_output
+                stats["api_calls"] += 1
 
-            if round_num == 0:
-                baseline_input = call_input
-                stats["model_confirmed"] = getattr(response, "model", None)
+                if round_num == 0:
+                    stats["connect_ms"] = round((time.perf_counter() - t_connect) * 1000)
+                    baseline_input = call_input
+                    stats["model_confirmed"] = getattr(response, "model", None)
 
-            choice = response.choices[0] if response.choices else None
+                choice = response.choices[0] if response.choices else None
 
-            if not choice or choice.finish_reason != "tool_calls" or not (choice.message and choice.message.tool_calls):
-                break
+                if not choice or choice.finish_reason != "tool_calls" or not (choice.message and choice.message.tool_calls):
+                    break
 
-            messages.append(choice.message)
+                messages.append(choice.message)
 
-            for tool_call in choice.message.tool_calls:
-                if tool_call.function.name != "$web_search":
-                    continue
-                stats["search_calls"] += 1
-                raw_args = tool_call.function.arguments
-                _notify(f"Search {stats['search_calls']}: round {round_num + 1} ({_elapsed()})")
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": raw_args,
-                })
+                for tool_call in choice.message.tool_calls:
+                    if tool_call.function.name != "$web_search":
+                        continue
+                    stats["search_calls"] += 1
+                    raw_args = tool_call.function.arguments
+                    _notify(f"Search {stats['search_calls']}: round {round_num + 1} ({_elapsed()})")
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": raw_args,
+                    })
 
-        _notify(f"Generating answer... ({_elapsed()})")
+            _notify(f"Generating answer... ({_elapsed()})")
 
-        stats["latency_ms"] = (time.perf_counter() - t0) * 1000
-        stats["tokens_used"] = stats["token_breakdown"]["input"] + stats["token_breakdown"]["output"]
+            stats["latency_ms"] = (time.perf_counter() - t0) * 1000
+            stats["tokens_used"] = stats["token_breakdown"]["input"] + stats["token_breakdown"]["output"]
 
-        if stats["api_calls"] > 1:
-            stats["token_breakdown"]["search_context"] = max(
-                0, stats["token_breakdown"]["input"] - baseline_input * stats["api_calls"]
-            )
+            if stats["api_calls"] > 1:
+                stats["token_breakdown"]["search_context"] = max(
+                    0, stats["token_breakdown"]["input"] - baseline_input * stats["api_calls"]
+                )
 
-        stats["answer"] = choice.message.content if choice and choice.message else ""
+            stats["answer"] = choice.message.content if choice and choice.message else ""
 
-        # Kimi does not expose source URLs via the API — extract from answer text.
-        seen = set()
-        for url in re.findall(r'https?://[^\s\)\]"\'<>]+', stats["answer"]):
-            url = url.rstrip('.,;:')
-            if url not in seen:
-                seen.add(url)
-                stats["sources"].append(url)
+            # Kimi does not expose source URLs via the API — extract from answer text.
+            seen = set()
+            for url in re.findall(r'https?://[^\s\)\]"\'<>]+', stats["answer"]):
+                url = url.rstrip('.,;:')
+                if url not in seen:
+                    seen.add(url)
+                    stats["sources"].append(url)
 
-        _notify(f"Complete — {stats['latency_ms']:.0f}ms total ({_elapsed()})")
+            _notify(f"Complete — {stats['latency_ms']:.0f}ms total ({_elapsed()})")
+
+        except Exception as e:
+            stats["answer"] = f"Error: {e}"
+            stats["latency_ms"] = (time.perf_counter() - t0) * 1000
+
         return stats
 
 

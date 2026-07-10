@@ -29,14 +29,17 @@ Thumbs.db
 
 # Logs
 *.log
+logs/
 
 # Archives (may contain keys)
 *.zip
 
 # Benchmark and A/B test output — generated data, not source
-comparison/benchmark_results_*.json
-comparison/ab_*_results*.json
-comparison/ab_claude_prompt_results.json
+comparison/benchmark_*.json
+comparison/benchmark_*.jsonl
+comparison/ab_*.json
+comparison/ab_*.jsonl
+comparison/parkinglot/
 GPT\ comparison/results_*.json
 
 # GPT comparison — standalone prototype, superseded by comparison/ and app/
@@ -48,6 +51,12 @@ article/
 
 # Competitive research spreadsheet — internal, not for public repo
 Search_API_Use_Case_Competitive_Audit.xlsx
+
+# Regression test suite — local dev tooling, not part of the published codebase
+regression/
+
+# MCP server config — local dev tooling, machine-specific paths
+**/mcp_config.json
 
 # Claude Code project config — local dev tooling, not project config
 .claude/
