@@ -1506,7 +1506,11 @@ function _buildGroupedSelect(sel, entries, defaultKey) {
     groups[vendor].forEach(([key, m]) => {
       const opt = document.createElement('option');
       opt.value = key;
-      opt.textContent = m.display_name || m.model;
+      const baseName = (m.display_name || m.model).replace(/\s*\([^)]*\)\s*$/, '').trim();
+      const stripVendor = ['OpenRouter', 'Alibaba Cloud', 'Moonshot AI'];
+      opt.textContent = stripVendor.includes(vendor)
+        ? baseName + (vendor === 'OpenRouter' ? ' (OR)' : '')
+        : m.display_name || m.model;
       if (key === defaultKey) opt.selected = true;
       grp.appendChild(opt);
     });
