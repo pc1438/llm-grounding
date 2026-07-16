@@ -43,13 +43,13 @@ llm-grounding/
 | `gpt5.4` | GPT-5.4 | OpenAI | Yes | Yes |
 | `gpt5.5` | GPT-5.5 | OpenAI | Yes | Yes |
 | `qwen` | Qwen3.7 Max | Alibaba Cloud | Yes | Yes |
-| `qwen-openrouter` | Qwen3.7 Max | Alibaba (via OpenRouter) | Yes | Yes |
+| `qwen-openrouter` | Qwen3.7 Max | OpenRouter | Yes | Yes |
 | `kimi` | Kimi K2.6 | Moonshot AI | Yes | Yes |
-| `kimi-openrouter` | Kimi K2.6 | Moonshot AI (via OpenRouter) | Yes | Yes |
-| `llama` | Llama 4 Maverick | Meta (via OpenRouter) | Yes | Yes |
-| `llama-scout` | Llama 4 Scout | Meta (via OpenRouter) | Yes | Yes |
-| `deepseek` | DeepSeek V3.1 | DeepSeek (via OpenRouter) | Yes | Yes |
-| `glm-5` | GLM-5 | Z.ai (via OpenRouter) | Yes | Yes |
+| `kimi-openrouter` | Kimi K2.6 | OpenRouter | Yes | Yes |
+| `llama` | Llama 4 Maverick | OpenRouter | Yes | Yes |
+| `llama-scout` | Llama 4 Scout | OpenRouter | Yes | Yes |
+| `deepseek` | DeepSeek V3.1 | OpenRouter | Yes | Yes |
+| `glm-5` | GLM-5 | OpenRouter | Yes | Yes |
 
 Native web search comparison requires provider support. Claude and GPT have production web search tools. Qwen and Kimi have experimental native search. Llama, DeepSeek, GLM-5, and Gemma have no native search and are You.com-only.
 

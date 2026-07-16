@@ -141,7 +141,7 @@
     "qwen-openrouter": {
       "model": "qwen/qwen3.7-max",
       "display_name": "Qwen3.7 Max (OpenRouter)",
-      "vendor": "Alibaba (via OpenRouter)",
+      "vendor": "OpenRouter",
       "provider": "openrouter",
       "in_comparison": true,
       "in_playground": true,
@@ -192,7 +192,7 @@
     "kimi-openrouter": {
       "model": "moonshotai/kimi-k2.5",
       "display_name": "Kimi K2.6 (OpenRouter)",
-      "vendor": "Moonshot AI (via OpenRouter)",
+      "vendor": "OpenRouter",
       "provider": "openrouter",
       "in_comparison": true,
       "in_playground": true,
@@ -216,7 +216,7 @@
     "llama": {
       "model": "meta-llama/llama-4-maverick",
       "display_name": "Llama 4 Maverick (OpenRouter)",
-      "vendor": "Meta (via OpenRouter)",
+      "vendor": "OpenRouter",
       "provider": "openrouter",
       "in_comparison": true,
       "in_playground": true,
@@ -240,7 +240,7 @@
     "llama-scout": {
       "model": "meta-llama/llama-4-scout",
       "display_name": "Llama 4 Scout (OpenRouter)",
-      "vendor": "Meta (via OpenRouter)",
+      "vendor": "OpenRouter",
       "provider": "openrouter",
       "in_comparison": true,
       "in_playground": true,
@@ -264,7 +264,7 @@
     "deepseek": {
       "model": "deepseek/deepseek-chat-v3.1",
       "display_name": "DeepSeek V3.1 (OpenRouter)",
-      "vendor": "DeepSeek (via OpenRouter)",
+      "vendor": "OpenRouter",
       "provider": "openrouter",
       "in_comparison": true,
       "in_playground": true,
@@ -288,7 +288,7 @@
     "glm-5": {
       "model": "z-ai/glm-5",
       "display_name": "GLM-5 (Z.ai via OpenRouter)",
-      "vendor": "Z.ai (via OpenRouter)",
+      "vendor": "OpenRouter",
       "provider": "openrouter",
       "in_comparison": true,
       "in_playground": true,
@@ -312,7 +312,7 @@
     "gemma": {
       "model": "google/gemma-3-27b-it",
       "display_name": "Gemma 3 27B (OpenRouter)",
-      "vendor": "Google (via OpenRouter)",
+      "vendor": "OpenRouter",
       "provider": "openrouter",
       "in_comparison": false,
       "in_playground": false,

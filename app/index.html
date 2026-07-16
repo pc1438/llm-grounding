@@ -1490,34 +1490,44 @@ async function loadSampleQueries() {
   }
 }
 
+function _buildGroupedSelect(sel, entries, defaultKey) {
+  // Group models by vendor, preserving pricing.json order within each group
+  const groups = {};
+  const groupOrder = [];
+  entries.forEach(([key, m]) => {
+    const vendor = m.vendor || 'Other';
+    if (!groups[vendor]) { groups[vendor] = []; groupOrder.push(vendor); }
+    groups[vendor].push([key, m]);
+  });
+  sel.innerHTML = '';
+  groupOrder.forEach(vendor => {
+    const grp = document.createElement('optgroup');
+    grp.label = vendor;
+    groups[vendor].forEach(([key, m]) => {
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = m.display_name || m.model;
+      if (key === defaultKey) opt.selected = true;
+      grp.appendChild(opt);
+    });
+    sel.appendChild(grp);
+  });
+}
+
 function populatePlaygroundDropdown() {
   if (!pricingData) return;
   const sel = document.getElementById('gModel');
   if (!sel) return;
-  sel.innerHTML = '';
-  Object.entries(pricingData.models)
-    .filter(([, m]) => m.in_playground)
-    .forEach(([key, m]) => {
-      const opt = document.createElement('option');
-      opt.value = key;
-      opt.textContent = m.display_name || m.model;
-      sel.appendChild(opt);
-    });
+  const entries = Object.entries(pricingData.models).filter(([, m]) => m.in_playground);
+  _buildGroupedSelect(sel, entries);
 }
 
 function populateComparisonDropdown() {
   if (!pricingData) return;
   const sel = document.getElementById('cProvider');
   if (!sel) return;
-  sel.innerHTML = '';
-  Object.entries(pricingData.models)
-    .filter(([, m]) => m.in_comparison)
-    .forEach(([key, m]) => {
-      const opt = document.createElement('option');
-      opt.value = key;
-      opt.textContent = m.display_name || m.model;
-      sel.appendChild(opt);
-    });
+  const entries = Object.entries(pricingData.models).filter(([, m]) => m.in_comparison);
+  _buildGroupedSelect(sel, entries);
 }
 
 function populateSupportedModels() {
@@ -1585,20 +1595,15 @@ function populateMultiSelects() {
   [0, 1, 2, 3, 4].forEach(slot => {
     const sel = document.getElementById(`mSelect${slot}`);
     if (!sel) return;
-    sel.innerHTML = '';
-    // None option first
+    // Prepend the None option, then grouped models
     const noneOpt = document.createElement('option');
     noneOpt.value = 'none';
     noneOpt.textContent = '— None —';
-    if (DEFAULT_PROVIDERS[slot] === 'none') noneOpt.selected = true;
+    sel.innerHTML = '';
     sel.appendChild(noneOpt);
-    models.forEach(([key, m]) => {
-      const opt = document.createElement('option');
-      opt.value = key;
-      opt.textContent = m.display_name || m.model;
-      if (key === DEFAULT_PROVIDERS[slot]) opt.selected = true;
-      sel.appendChild(opt);
-    });
+    if (DEFAULT_PROVIDERS[slot] === 'none') noneOpt.selected = true;
+    _buildGroupedSelect(sel, models, DEFAULT_PROVIDERS[slot]);
+    // _buildGroupedSelect appends groups after the None option
   });
 }
 
