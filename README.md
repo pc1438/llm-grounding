@@ -9,7 +9,7 @@ Most teams building search-grounded AI systems face the same set of questions:
 - What does grounding actually cost — inference tokens, search fees, combined?
 - How does grounding quality vary across providers?
 
-This repo gives you working code to run those experiments yourself, across thirteen LLMs, with a blind cross-model judge and full cost accounting.
+This repo gives you working code to run those experiments yourself, across fourteen LLMs, with a blind cross-model judge and full cost accounting.
 
 ## What's Here
 
@@ -50,6 +50,7 @@ llm-grounding/
 | `llama-scout` | Llama 4 Scout | OpenRouter | Yes | Yes |
 | `deepseek` | DeepSeek V3.1 | OpenRouter | Yes | Yes |
 | `glm-5` | GLM-5 | OpenRouter | Yes | Yes |
+| `gpt-oss-120b` | GPT OSS 120B | OpenRouter | Yes | Yes |
 
 Native web search comparison requires provider support. Claude and GPT have production web search tools. Qwen and Kimi have experimental native search. Llama, DeepSeek, GLM-5, and Gemma have no native search and are You.com-only.
 

@@ -23,6 +23,7 @@ Proves two things:
 | `llama-scout` | Llama 4 Scout (OpenRouter) | You.com only | Claude judges Llama |
 | `deepseek` | DeepSeek V3.1 (OpenRouter) | You.com only | Claude judges DeepSeek |
 | `glm-5` | GLM-5 (Z.ai via OpenRouter) | You.com only | Claude judges GLM |
+| `gpt-oss-120b` | GPT OSS 120B (OpenRouter) | You.com only | Claude judges GPT OSS |
 
 The judge is always a different LLM than the one being tested (cross-model) to avoid self-grading bias. Answers are randomly assigned to positions A/B so the judge can't infer which system produced which answer.
 
