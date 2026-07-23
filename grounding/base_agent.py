@@ -243,13 +243,14 @@ class AnthropicAgent(BaseAgent):
         search_num = 0
         response = None
         _max_rounds = max_rounds if max_rounds is not None else MAX_TOOL_ROUNDS
+        _system_prompt = get_system_prompt(self.model, max_searches=max_rounds) if max_rounds is not None else self.system_prompt
 
         for round_num in range(_max_rounds):
             try:
                 t_connect = time.perf_counter()
                 response = self.client.messages.create(
                     model=self.model,
-                    system=self.system_prompt,
+                    system=_system_prompt,
                     max_tokens=MAX_TOKENS,
                     tools=[TOOL_SCHEMA_ANTHROPIC],
                     messages=messages,
@@ -385,14 +386,15 @@ class OpenAICompatibleAgent(BaseAgent):
 
     def stream(self, question: str, max_rounds: int = None) -> Generator[dict, None, None]:
         stats = _empty_stats(self.model)
+        _max_rounds = max_rounds if max_rounds is not None else MAX_TOOL_ROUNDS
+        _system_prompt = get_system_prompt(self.model, max_searches=max_rounds) if max_rounds is not None else self.system_prompt
         messages = [
-            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": _system_prompt},
             {"role": "user", "content": question},
         ]
         t0 = time.perf_counter()
         baseline_input = 0
         search_num = 0
-        _max_rounds = max_rounds if max_rounds is not None else MAX_TOOL_ROUNDS
         response = None
 
         for round_num in range(_max_rounds):
@@ -575,13 +577,14 @@ class OpenAIResponsesAgent(BaseAgent):
         response = None
         search_num = 0
         _max_rounds = max_rounds if max_rounds is not None else MAX_TOOL_ROUNDS
+        _system_prompt = get_system_prompt(self.model, max_searches=max_rounds) if max_rounds is not None else self.system_prompt
 
         for round_num in range(_max_rounds):
             try:
                 t_connect = time.perf_counter()
                 response = self.client.responses.create(
                     model=self.model,
-                    instructions=self.system_prompt,
+                    instructions=_system_prompt,
                     input=current_input,
                     tools=[TOOL_SCHEMA_RESPONSES],
                     previous_response_id=previous_response_id,

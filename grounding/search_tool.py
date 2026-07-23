@@ -111,12 +111,15 @@ MAX_TOOL_ROUNDS = 15    # Max LLM ↔ tool-use round-trips before we force a fin
 NATIVE_SEARCH_BASELINE_TOKENS = 300
 
 
-def get_system_prompt(model: str = "") -> str:
+def get_system_prompt(model: str = "", max_searches: int = None) -> str:
     """Return the system prompt with the current date/time appended.
 
     This gives the LLM temporal context so it can interpret relative
     references like 'yesterday', 'this week', 'latest', etc. and
     construct better search queries.
+
+    When max_searches is set, the LLM is told its budget upfront so it can
+    plan its search strategy accordingly rather than being cut off mid-stream.
 
     All runtime callers should use this instead of the static SYSTEM_PROMPT.
     The static constant is kept for imports that need the base text
@@ -129,7 +132,8 @@ def get_system_prompt(model: str = "") -> str:
     now = datetime.now(timezone.utc)
     timestamp = now.strftime("%A, %B %d, %Y at %H:%M UTC")
     extra = _GPT_55_SEARCH_RULES if "gpt-5.5" in model.lower() else ""
-    return f"{SYSTEM_PROMPT}{extra}\n\nCurrent date and time: {timestamp}"
+    budget = f"\n\nSearch budget: you have {max_searches} web search(es) available for this query. Plan your searches accordingly — prioritize the most important queries first." if max_searches is not None else ""
+    return f"{SYSTEM_PROMPT}{extra}{budget}\n\nCurrent date and time: {timestamp}"
 
 
 # ─── Tool schema (OpenAI-compatible format) ──────────────────────────────────

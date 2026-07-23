@@ -130,6 +130,24 @@
   .max-rounds-wrap {
     display: flex; align-items: center; gap: 5px;
     font-size: 13px; color: var(--muted); white-space: nowrap;
+    position: relative;
+  }
+  .max-rounds-wrap .hint {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 15px; height: 15px; border-radius: 50%;
+    background: var(--border-mid); color: var(--text-2);
+    font-size: 10px; font-weight: 700; cursor: default;
+    position: relative;
+  }
+  .max-rounds-wrap .hint:hover::after {
+    content: attr(data-tip);
+    position: absolute; bottom: calc(100% + 6px); right: 0;
+    background: #1e1e2e; color: #e2e8f0;
+    font-size: 12px; font-weight: 400; line-height: 1.5;
+    padding: 8px 12px; border-radius: 6px;
+    width: 260px; white-space: normal; text-align: left;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    z-index: 100; pointer-events: none;
   }
   .max-rounds-wrap input[type="number"] {
     width: 52px;
@@ -1237,6 +1255,7 @@
   <div class="max-rounds-wrap">
     <label for="gMaxRounds">Max searches</label>
     <input type="number" id="gMaxRounds" min="1" max="15" value="15">
+    <span class="hint" data-tip="Caps total You.com searches per query. The LLM is told its budget upfront so it can prioritize. Note: if the LLM issues parallel searches in one turn, the actual count may slightly exceed this limit.">i</span>
   </div>
   <button id="gRunBtn" onclick="runGrounding()">Run</button>
   <button id="gStopBtn" class="stop-btn" onclick="stopGrounding()" style="display:none">Stop</button>
@@ -1273,6 +1292,7 @@
   <div class="max-rounds-wrap">
     <label for="cMaxRounds">Max searches</label>
     <input type="number" id="cMaxRounds" min="1" max="15" value="15">
+    <span class="hint" data-tip="Caps total You.com searches per query. The LLM is told its budget upfront so it can prioritize. Note: if the LLM issues parallel searches in one turn, the actual count may slightly exceed this limit.">i</span>
   </div>
   <button id="cRunBtn" onclick="runComparison()">Compare</button>
   <button id="cStopBtn" class="stop-btn" onclick="stopComparison()" style="display:none">Stop</button>
@@ -1441,6 +1461,7 @@
   <div class="max-rounds-wrap">
     <label for="mMaxRounds">Max searches</label>
     <input type="number" id="mMaxRounds" min="1" max="15" value="15">
+    <span class="hint" data-tip="Caps total You.com searches per query. The LLM is told its budget upfront so it can prioritize. Note: if the LLM issues parallel searches in one turn, the actual count may slightly exceed this limit.">i</span>
   </div>
   <button id="mRunBtn" onclick="runMulti()">Run All</button>
   <button id="mStopBtn" class="stop-btn" onclick="stopMulti()" style="display:none">Stop</button>
