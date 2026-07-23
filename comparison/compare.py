@@ -166,6 +166,7 @@ def run_youdotcom(
     question: str,
     model_config: dict,
     on_progress=None,
+    max_rounds: int = None,
 ) -> dict:
     """Run a query through LLM + You.com Search (tool-use approach).
 
@@ -175,7 +176,7 @@ def run_youdotcom(
     model_id = model_config["model"]
     provider = model_config["provider"]
     agent = _get_agent(provider, model_id)
-    stats = agent.ask(question, on_progress=on_progress)
+    stats = agent.ask(question, on_progress=on_progress, max_rounds=max_rounds)
     stats["path"] = f"{model_id} + You.com Search"
     return stats
 

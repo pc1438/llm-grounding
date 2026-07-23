@@ -282,6 +282,12 @@ class AppHandler(SimpleHTTPRequestHandler):
 
         query = params.get("query", "").strip()
         model_key = params.get("model", "claude")
+        max_rounds = params.get("max_rounds", None)
+        if max_rounds is not None:
+            try:
+                max_rounds = max(1, min(15, int(max_rounds)))
+            except (TypeError, ValueError):
+                max_rounds = None
 
         if not query:
             self._send_json(400, {"error": "Query is required"})
@@ -305,7 +311,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         t_start = time.perf_counter()
         first_ms = None
 
-        for event in run_grounding(model_key, query):
+        for event in run_grounding(model_key, query, max_rounds=max_rounds):
             etype = event["event"]
 
             if first_ms is None and etype not in ("init",):
@@ -344,6 +350,12 @@ class AppHandler(SimpleHTTPRequestHandler):
         query = params.get("query", "").strip()
         provider = params.get("provider", "claude")
         skip_judge = params.get("skip_judge", False)
+        max_rounds = params.get("max_rounds", None)
+        if max_rounds is not None:
+            try:
+                max_rounds = max(1, min(15, int(max_rounds)))
+            except (TypeError, ValueError):
+                max_rounds = None
 
         if not query:
             self._send_json(400, {"error": "Query is required"})
@@ -387,7 +399,8 @@ class AppHandler(SimpleHTTPRequestHandler):
             t0 = time.perf_counter()
             try:
                 ydc_result["stats"] = run_youdotcom(query, model_config,
-                    on_progress=make_progress_fn(ydc_result, "ydc"))
+                    on_progress=make_progress_fn(ydc_result, "ydc"),
+                    max_rounds=max_rounds)
                 ydc_result["thread_ms"] = (time.perf_counter() - t0) * 1000
             except Exception as e:
                 logger.error("You.com path failed: %s", e, exc_info=True)
@@ -539,6 +552,12 @@ class AppHandler(SimpleHTTPRequestHandler):
 
         query = params.get("query", "").strip()
         providers = params.get("providers", [])
+        max_rounds = params.get("max_rounds", None)
+        if max_rounds is not None:
+            try:
+                max_rounds = max(1, min(15, int(max_rounds)))
+            except (TypeError, ValueError):
+                max_rounds = None
 
         if not isinstance(providers, list):
             self._send_json(400, {"error": "'providers' must be a list"})
@@ -576,7 +595,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                     _first_ms[0] = round((time.perf_counter() - t_slot) * 1000)
                 send_sse_safe("model_progress", {"slot": slot, "message": msg})
             try:
-                stats = run_youdotcom(query, model_config, on_progress=_on_progress)
+                stats = run_youdotcom(query, model_config, on_progress=_on_progress, max_rounds=max_rounds)
                 _slot_overhead = (time.perf_counter() - t_slot) * 1000 - stats["latency_ms"]
                 logger.info("[multi/ydc] provider=%s searches=%d api_calls=%d latency=%.0fms connect=%.0fms overhead=%.0fms",
                     provider, stats["search_calls"], stats["api_calls"], stats["latency_ms"],

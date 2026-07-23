@@ -127,6 +127,22 @@
   .input-bar button:disabled { background: var(--border-mid); cursor: not-allowed; }
   .input-bar .stop-btn { background: #fff; color: #b85c4a; border: 1.5px solid #b85c4a; }
   .input-bar .stop-btn:hover { background: #fdf2f2; }
+  .max-rounds-wrap {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 13px; color: var(--muted); white-space: nowrap;
+  }
+  .max-rounds-wrap input[type="number"] {
+    width: 52px;
+    background: #fff;
+    color: var(--text);
+    border: 1px solid var(--border-mid);
+    border-radius: 8px;
+    padding: 10px 8px;
+    font-size: 14px;
+    text-align: center;
+    outline: none;
+  }
+  .max-rounds-wrap input[type="number"]:focus { border-color: var(--primary); }
   .input-bar label {
     display: flex; align-items: center; gap: 6px;
     font-size: 13px; color: var(--muted); cursor: pointer; white-space: nowrap;
@@ -1218,6 +1234,10 @@
   </div>
   <input type="text" id="gQuery" list="sampleQueries" placeholder="Ask a question or pick from 50 samples…"
          value="What happened in tech news today?">
+  <div class="max-rounds-wrap">
+    <label for="gMaxRounds">Max searches</label>
+    <input type="number" id="gMaxRounds" min="1" max="15" value="15">
+  </div>
   <button id="gRunBtn" onclick="runGrounding()">Run</button>
   <button id="gStopBtn" class="stop-btn" onclick="stopGrounding()" style="display:none">Stop</button>
 </div>
@@ -1250,6 +1270,10 @@
   <input type="text" id="cQuery" list="sampleQueries" placeholder="Ask a question or pick from 50 samples…"
          value="Who won the 2026 men's hockey Olympic gold?">
   <label><input type="checkbox" id="cSkipJudge"> Skip judge</label>
+  <div class="max-rounds-wrap">
+    <label for="cMaxRounds">Max searches</label>
+    <input type="number" id="cMaxRounds" min="1" max="15" value="15">
+  </div>
   <button id="cRunBtn" onclick="runComparison()">Compare</button>
   <button id="cStopBtn" class="stop-btn" onclick="stopComparison()" style="display:none">Stop</button>
 </div>
@@ -1414,6 +1438,10 @@
   </div>
   <input type="text" id="mQuery" list="sampleQueries" placeholder="Ask a question or pick from 50 samples…"
          value="Who won the 2026 men's hockey Olympic gold?">
+  <div class="max-rounds-wrap">
+    <label for="mMaxRounds">Max searches</label>
+    <input type="number" id="mMaxRounds" min="1" max="15" value="15">
+  </div>
   <button id="mRunBtn" onclick="runMulti()">Run All</button>
   <button id="mStopBtn" class="stop-btn" onclick="stopMulti()" style="display:none">Stop</button>
 </div>
@@ -1653,6 +1681,7 @@ async function runMulti() {
     .map(i => document.getElementById(`mSelect${i}`).value)
     .filter(v => v !== 'none');
   if (providers.length === 0) return;
+  const maxRounds = parseInt(document.getElementById('mMaxRounds').value, 10) || null;
   const btn = document.getElementById('mRunBtn');
 
   _multiController = new AbortController();
@@ -1668,7 +1697,7 @@ async function runMulti() {
   _buildMultiPanes(providers);
 
   try {
-    await streamSSE('/api/multi-compare', { query, providers },
+    await streamSSE('/api/multi-compare', { query, providers, max_rounds: maxRounds },
       handleMultiEvent,
       msg => { document.getElementById('mStatusText').textContent = `Error: ${msg}`; },
       _multiController.signal
@@ -1931,6 +1960,12 @@ async function loadConfig() {
     ]);
     const cfg = await cfgRes.json();
     const pricing = await pricingRes.json();
+    if (cfg.max_tool_rounds) {
+      ['gMaxRounds', 'cMaxRounds', 'mMaxRounds'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = cfg.max_tool_rounds;
+      });
+    }
     renderConfigSection(cfg, pricing);
   } catch(e) {
     document.getElementById('ac-config-body').innerHTML =
@@ -2099,6 +2134,7 @@ function stopGrounding() {
 async function runGrounding() {
   const model = document.getElementById('gModel').value;
   const query = document.getElementById('gQuery').value.trim();
+  const maxRounds = parseInt(document.getElementById('gMaxRounds').value, 10) || null;
   const btn = document.getElementById('gRunBtn');
   if (!query) return;
 
@@ -2112,7 +2148,7 @@ async function runGrounding() {
   document.getElementById('gTimeline').innerHTML = '';
 
   try {
-    await streamSSE('/api/grounding', { model, query },
+    await streamSSE('/api/grounding', { model, query, max_rounds: maxRounds },
       handleGroundingEvent,
       msg => { document.getElementById('gStatusText').textContent = `Error: ${msg}`; },
       _groundingController.signal
@@ -2344,6 +2380,7 @@ async function runComparison() {
   const query = document.getElementById('cQuery').value.trim();
   const provider = document.getElementById('cProvider').value;
   const skipJudge = document.getElementById('cSkipJudge').checked;
+  const maxRounds = parseInt(document.getElementById('cMaxRounds').value, 10) || null;
   const btn = document.getElementById('cRunBtn');
   if (!query) return;
 
@@ -2390,7 +2427,7 @@ async function runComparison() {
 
   try {
     await streamSSE('/api/compare',
-      { query, provider, skip_judge: skipJudge },
+      { query, provider, skip_judge: skipJudge, max_rounds: maxRounds },
       handleCompareEvent,
       msg => { document.getElementById('cStatusText').textContent = `Error: ${msg}`; },
       _compareController.signal

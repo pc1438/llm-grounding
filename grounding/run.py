@@ -82,6 +82,7 @@ def run_grounding(
     model_key: str,
     question: str,
     force_chat_completions: bool = False,
+    max_rounds: int = None,
 ) -> Generator[dict, None, None]:
     """Run a grounded query and yield events as the tool-use loop progresses.
 
@@ -127,7 +128,7 @@ def run_grounding(
     }
 
     try:
-        for event in agent.stream(question):
+        for event in agent.stream(question, max_rounds=max_rounds):
             yield event
     except Exception as e:
         logging.exception("agent.stream() raised an unexpected error")
