@@ -326,6 +326,10 @@ class AnthropicAgent(BaseAgent):
 
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user", "content": tool_results})
+            if search_num >= _max_rounds:
+                stats["hit_round_limit"] = True
+                logger.warning("Tool loop hit search cap max_rounds=%d (model=%s)", _max_rounds, self.model)
+                break
         else:
             stats["hit_round_limit"] = True
             logger.warning("Tool loop hit max_rounds=%d (model=%s)", _max_rounds, self.model)
@@ -488,6 +492,11 @@ class OpenAICompatibleAgent(BaseAgent):
                     "tool_call_id": tool_call.id,
                     "content": result,
                 })
+
+            if search_num >= _max_rounds:
+                stats["hit_round_limit"] = True
+                logger.warning("Tool loop hit search cap max_rounds=%d (model=%s) — forcing synthesis call", _max_rounds, self.model)
+                break
         else:
             stats["hit_round_limit"] = True
             logger.warning("Tool loop hit max_rounds=%d (model=%s) — forcing synthesis call", _max_rounds, self.model)
@@ -670,6 +679,10 @@ class OpenAIResponsesAgent(BaseAgent):
                 })
 
             current_input = tool_outputs
+            if search_num >= _max_rounds:
+                stats["hit_round_limit"] = True
+                logger.warning("Tool loop hit search cap max_rounds=%d (model=%s) — forcing synthesis call", _max_rounds, self.model)
+                break
         else:
             logger.warning("Tool loop hit max_rounds=%d (model=%s) — forcing synthesis call", _max_rounds, self.model)
             try:

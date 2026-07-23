@@ -306,6 +306,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             return
 
         model_config = PLAYGROUND_MODELS.get(model_key, {})
+        logger.info("[grounding] model=%s max_rounds=%s query=%.60s", model_key, max_rounds, query)
         self._start_sse()
 
         t_start = time.perf_counter()
