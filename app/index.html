@@ -2030,7 +2030,12 @@ function renderConfigSection(cfg, pricing) {
   const promptHtml = `
     <div style="font-size:13px;font-weight:700;color:var(--text-2);margin:20px 0 8px;text-transform:uppercase;letter-spacing:0.05em">System Prompt</div>
     <div style="background:#f7f4ee;border:1px solid var(--border);border-radius:6px;padding:12px 14px;font-size:12px;color:var(--text-2);white-space:pre-wrap;font-family:monospace;line-height:1.5">${cfg.system_prompt}</div>
-    <p style="font-size:12px;color:var(--muted);margin-top:6px">Defined in <code>grounding/search_tool.py</code> — <code>SYSTEM_PROMPT</code>. Modify to change retrieval behavior, citation style, or search aggressiveness.</p>`;
+    <p style="font-size:12px;color:var(--muted);margin-top:6px">Defined in <code>grounding/search_tool.py</code> — <code>SYSTEM_PROMPT</code>. Modify to change retrieval behavior, citation style, or search aggressiveness.</p>
+    <div style="margin-top:12px;padding:10px 14px;background:var(--band);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text-2);line-height:1.6">
+      <strong style="color:var(--text)">How the system prompt is managed at runtime</strong><br>
+      Agent instances are created once at server startup and cached in <code>agent_pool.py</code> (the pool). Each cached agent bakes in the default system prompt — <code>SYSTEM_PROMPT</code> + current timestamp — at init time.<br><br>
+      When you set a custom <strong>Max searches</strong> value on any tab, <code>get_system_prompt()</code> is called at the start of that specific request with the budget appended (<em>"Search budget: you have N web search(es) available…"</em>). This per-call override is local to the <code>stream()</code> invocation — the cached agent and its stored <code>self.system_prompt</code> are not modified. The next request with no override reverts to the cached default automatically.
+    </div>`;
 
   const overrides = cfg.prompt_overrides || {};
   const overridesHtml = Object.keys(overrides).length === 0 ? '' :
