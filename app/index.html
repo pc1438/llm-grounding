@@ -2001,7 +2001,7 @@ function renderConfigSection(cfg, pricing) {
 
   // Search loop
   const searchRows = [
-    ['MAX_TOOL_ROUNDS', cfg.max_tool_rounds, 'Hard cap on LLM ↔ tool-use round-trips before forcing a final answer.', 'Lower to 3–5 for latency-sensitive use cases. Most queries finish in 1–3 rounds.'],
+    ['MAX_TOOL_ROUNDS', cfg.max_tool_rounds, 'Hard cap on the number of You.com searches per query. Models can issue multiple searches in a single round-trip (parallel tool use), so this caps total search count, not round-trips. Overridable per-run via the "Max searches" control on each tab.', 'Lower to 3–5 for latency-sensitive use cases. Most queries finish in 1–3 searches.'],
     ['MAX_TOKENS', cfg.max_tokens, 'Max output tokens per LLM call. Controls answer length ceiling.', 'Raise for detailed multi-section answers. Raising significantly increases cost on long-context queries.'],
   ];
 
@@ -2955,7 +2955,7 @@ const CODE_INFO = {
       alternatives: [
         'claude-opus-4-8 for higher quality at ~5× cost — same code path, different model ID.',
         'Add recency="day" or recency="week" to the You.com tool call to restrict to fresh results on time-sensitive queries.',
-        'Lower MAX_TOOL_ROUNDS to 3–5 for latency-sensitive deployments — most factual queries resolve in 1–2 rounds.',
+        'Lower MAX_TOOL_ROUNDS to 3–5 for latency-sensitive deployments — most factual queries resolve in 1–2 searches. Overridable per-run via the "Max searches" control on each tab without restarting the server.',
         'Add domain filters to the You.com tool schema to restrict sources (e.g., site:reuters.com for news queries).',
         'Enable prompt caching (cache_control on system message) to cut input token cost ~80% on repeated similar queries.',
       ],
@@ -3065,7 +3065,7 @@ const CODE_INFO = {
         'parallel_tool_calls=True to let GPT issue multiple You.com searches in a single round — increases throughput but makes per-search cost tracking harder.',
         'Add recency="day" to the You.com tool schema for time-sensitive queries.',
         'gpt-5.5 for higher quality at 2× cost — identical code path, different model ID and max_completion_tokens value.',
-        'Lower MAX_TOOL_ROUNDS to 3–5 for latency-sensitive use cases.',
+        'Lower MAX_TOOL_ROUNDS to 3–5 for latency-sensitive use cases. Overridable per-run via the "Max searches" control on each tab.',
       ],
     },
     native: {
