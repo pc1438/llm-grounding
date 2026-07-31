@@ -156,6 +156,9 @@ class AppHandler(SimpleHTTPRequestHandler):
         elif self.path == "/api/questions":
             questions_file = Path(__file__).parent.parent / "comparison" / "benchmark_questions_50.json"
             self._serve_json_file(questions_file)
+        elif self.path == "/api/retrievalqa":
+            questions_file = Path(__file__).parent.parent / "comparison" / "retrievalqa_questions.json"
+            self._serve_json_file(questions_file)
         else:
             self.send_error(404)
 

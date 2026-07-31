@@ -633,6 +633,60 @@
   }
   .input-bar .info-btn:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
 
+  /* ── Question browser panel ─────────────────────────────────── */
+  .qbrowser {
+    display: none;
+    border-bottom: 1px solid var(--border);
+    background: var(--band);
+    padding: 14px 32px 18px;
+  }
+  .qbrowser.open { display: block; }
+  .qbrowser-tabs {
+    display: flex; gap: 8px; margin-bottom: 12px; align-items: center;
+  }
+  .qbrowser-tab {
+    padding: 5px 14px; border-radius: 20px; font-size: 12px; font-weight: 600;
+    cursor: pointer; border: 1.5px solid var(--border-mid);
+    background: #fff; color: var(--text-2);
+    transition: all 0.15s;
+  }
+  .qbrowser-tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .qbrowser-tab .count { opacity: 0.7; font-weight: 400; margin-left: 4px; }
+  .qbrowser-search {
+    flex: 1; max-width: 340px;
+    background: #fff; border: 1px solid var(--border-mid); border-radius: 8px;
+    padding: 6px 12px; font-size: 13px; color: var(--text); outline: none;
+    margin-left: auto;
+  }
+  .qbrowser-search:focus { border-color: var(--primary); }
+  .qbrowser-list {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 6px; max-height: 260px; overflow-y: auto;
+  }
+  .qbrowser-item {
+    background: #fff; border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 12px;
+    font-size: 12.5px; color: var(--text);
+    cursor: pointer; line-height: 1.4;
+    display: flex; gap: 8px; align-items: flex-start;
+    transition: border-color 0.12s, background 0.12s;
+  }
+  .qbrowser-item:hover { border-color: var(--primary); background: #f5f3ff; }
+  .qbrowser-item .q-badge {
+    flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 2px 6px;
+    border-radius: 4px; margin-top: 1px; text-transform: uppercase; letter-spacing: 0.03em;
+  }
+  .qbrowser-item .q-badge.tier1 { background: #dcfce7; color: #166534; }
+  .qbrowser-item .q-badge.tier2 { background: #fef9c3; color: #854d0e; }
+  .qbrowser-item .q-badge.tier3 { background: #fee2e2; color: #991b1b; }
+  .qbrowser-item .q-badge.tier4 { background: #ede9fe; color: #5b21b6; }
+  .qbrowser-item .q-badge.realtimeqa { background: #dbeafe; color: #1e40af; }
+  .qbrowser-item .q-badge.freshqa { background: #d1fae5; color: #065f46; }
+  .qbrowser-item .q-answer {
+    font-size: 10.5px; color: var(--muted); margin-top: 3px; font-style: italic;
+  }
+  .qbrowser-empty { font-size: 13px; color: var(--muted); padding: 12px 0; }
+
   /* ── Code info modal ────────────────────────────────────────── */
   #codeInfoOverlay {
     display: none; position: fixed; inset: 0; z-index: 10000;
@@ -1233,6 +1287,83 @@
     </div>
   </div>
 
+  <div class="about-collapsible" id="ac-evaldata">
+    <div class="about-collapsible-header" onclick="toggleAboutSection('ac-evaldata')">
+      <span class="about-collapsible-toggle">▶</span>
+      <div>
+        <div class="about-collapsible-heading">Evaluation Datasets</div>
+        <div class="about-collapsible-preview">Your 50-question benchmark · RetrievalQA (ACL 2024) — what each dataset tests and why we picked what we did</div>
+      </div>
+    </div>
+    <div class="about-collapsible-body">
+
+      <h3 style="font-size:14px;font-weight:700;margin:0 0 10px">Your 50-Question Benchmark</h3>
+      <p style="font-size:13px;color:var(--text-2);line-height:1.6;margin-bottom:12px">
+        Hand-curated to stress-test <strong>search quality and cost</strong> across four difficulty tiers:
+        Simple (current facts), Moderate (synthesis across sources), Complex (multi-source, multi-hop),
+        and Deep Research (investigative, open-ended). Questions are domain-diverse — finance, tech,
+        health, sports, regulation — and deliberately favour queries where a good search strategy
+        matters. No ground-truth answers; quality is judged by the cross-model blind evaluator.
+      </p>
+      <table style="width:100%;font-size:12.5px;border-collapse:collapse;margin-bottom:16px">
+        <thead><tr style="background:var(--band)">
+          <th style="text-align:left;padding:6px 10px;border:1px solid var(--border)">Tier</th>
+          <th style="text-align:left;padding:6px 10px;border:1px solid var(--border)">Count</th>
+          <th style="text-align:left;padding:6px 10px;border:1px solid var(--border)">What it tests</th>
+          <th style="text-align:left;padding:6px 10px;border:1px solid var(--border)">Example</th>
+        </tr></thead>
+        <tbody>
+          <tr><td style="padding:6px 10px;border:1px solid var(--border)">Simple</td><td style="padding:6px 10px;border:1px solid var(--border)">12</td><td style="padding:6px 10px;border:1px solid var(--border)">Current facts — LLM just needs to fetch</td><td style="padding:6px 10px;border:1px solid var(--border);color:var(--text-2)">What is the current price of NVIDIA stock?</td></tr>
+          <tr><td style="padding:6px 10px;border:1px solid var(--border)">Moderate</td><td style="padding:6px 10px;border:1px solid var(--border)">18</td><td style="padding:6px 10px;border:1px solid var(--border)">Multi-source synthesis — reasoning required</td><td style="padding:6px 10px;border:1px solid var(--border);color:var(--text-2)">Compare TSMC and Samsung's latest revenue figures and margins</td></tr>
+          <tr><td style="padding:6px 10px;border:1px solid var(--border)">Complex</td><td style="padding:6px 10px;border:1px solid var(--border)">12</td><td style="padding:6px 10px;border:1px solid var(--border)">Multi-hop — requires several targeted searches</td><td style="padding:6px 10px;border:1px solid var(--border);color:var(--text-2)">What US states have passed AI regulation bills in 2025–2026?</td></tr>
+          <tr><td style="padding:6px 10px;border:1px solid var(--border)">Deep Research</td><td style="padding:6px 10px;border:1px solid var(--border)">8</td><td style="padding:6px 10px;border:1px solid var(--border)">Investigative — open-ended, no single answer</td><td style="padding:6px 10px;border:1px solid var(--border);color:var(--text-2)">What are the most significant AI safety incidents reported in 2025?</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:14px;font-weight:700;margin:16px 0 10px">RetrievalQA (ACL 2024 · Zhang et al.)</h3>
+      <p style="font-size:13px;color:var(--text-2);line-height:1.6;margin-bottom:10px">
+        An academic benchmark (<a href="https://arxiv.org/abs/2402.16457" target="_blank" style="color:var(--primary)">arXiv 2402.16457</a> · <a href="https://github.com/hyintell/RetrievalQA" target="_blank" style="color:var(--primary)">GitHub</a>) designed to test
+        <em>adaptive retrieval</em> — whether LLMs know when to retrieve vs. answer from memory.
+        2,785 questions total across five sources. The key property: 1,271 questions are provably
+        unanswerable from LLM parametric knowledge (training data) alone — retrieval is required
+        to get the right answer.
+      </p>
+      <p style="font-size:13px;color:var(--text-2);line-height:1.6;margin-bottom:12px">
+        <strong>What we included (242 questions):</strong> RealTimeQA (188) and FreshQA (54) — the two subsets
+        where live web retrieval is genuinely required. These are recent-events and current-state
+        questions with verifiable short answers.
+        <strong>What we excluded:</strong> ToolQA (calendar event lookups — not web search relevant),
+        PopQA (obscure static entity facts — not time-sensitive), TriviaQA (parametric knowledge
+        — LLMs answer correctly without searching).
+      </p>
+
+      <table style="width:100%;font-size:12.5px;border-collapse:collapse;margin-bottom:16px">
+        <thead><tr style="background:var(--band)">
+          <th style="text-align:left;padding:6px 10px;border:1px solid var(--border)">Source</th>
+          <th style="text-align:left;padding:6px 10px;border:1px solid var(--border)">Included</th>
+          <th style="text-align:left;padding:6px 10px;border:1px solid var(--border)">Why</th>
+          <th style="text-align:left;padding:6px 10px;border:1px solid var(--border)">Example</th>
+        </tr></thead>
+        <tbody>
+          <tr><td style="padding:6px 10px;border:1px solid var(--border)">RealTimeQA</td><td style="padding:6px 10px;border:1px solid var(--border)">✅ 188</td><td style="padding:6px 10px;border:1px solid var(--border)">Recent news — answer changes weekly</td><td style="padding:6px 10px;border:1px solid var(--border);color:var(--text-2)">Which scandal-plagued US politician was hit with 10 new criminal charges this week?</td></tr>
+          <tr><td style="padding:6px 10px;border:1px solid var(--border)">FreshQA</td><td style="padding:6px 10px;border:1px solid var(--border)">✅ 54</td><td style="padding:6px 10px;border:1px solid var(--border)">Live-state facts — answer changes daily</td><td style="padding:6px 10px;border:1px solid var(--border);color:var(--text-2)">Who is the richest man on earth?</td></tr>
+          <tr style="color:var(--muted)"><td style="padding:6px 10px;border:1px solid var(--border)">ToolQA</td><td style="padding:6px 10px;border:1px solid var(--border)">✗ 75</td><td style="padding:6px 10px;border:1px solid var(--border)">Calendar lookups — not web-search relevant</td><td style="padding:6px 10px;border:1px solid var(--border)">What time did Grace attend Broadway Show on 2022/02/17?</td></tr>
+          <tr style="color:var(--muted)"><td style="padding:6px 10px;border:1px solid var(--border)">PopQA</td><td style="padding:6px 10px;border:1px solid var(--border)">✗ 1,570</td><td style="padding:6px 10px;border:1px solid var(--border)">Static entity facts — not time-sensitive</td><td style="padding:6px 10px;border:1px solid var(--border)">What is Henry Feilden's occupation?</td></tr>
+          <tr style="color:var(--muted)"><td style="padding:6px 10px;border:1px solid var(--border)">TriviaQA</td><td style="padding:6px 10px;border:1px solid var(--border)">✗ 898</td><td style="padding:6px 10px;border:1px solid var(--border)">Parametric knowledge — no retrieval needed</td><td style="padding:6px 10px;border:1px solid var(--border)">By what name is Siddhartha Gautama better known?</td></tr>
+        </tbody>
+      </table>
+
+      <div style="background:var(--band);border:1px solid var(--border);border-radius:6px;padding:12px 14px;font-size:12.5px;color:var(--text-2);line-height:1.6">
+        <strong style="color:var(--text)">How the two datasets complement each other</strong><br>
+        Your 50 questions test <em>how well</em> an LLM searches — multi-hop reasoning, source synthesis, cost efficiency.
+        RetrievalQA tests <em>whether</em> retrieval produces the correct factual answer on short-form questions with a known ground truth.
+        Together they cover both dimensions: search strategy quality (your 50) and retrieval correctness on verifiable facts (RetrievalQA).
+        The expected answers in RetrievalQA also make it possible to run automated correctness scoring in future — something the open-ended 50-question set cannot do.
+      </div>
+
+    </div>
+  </div>
+
 </div>
 </div>
 
@@ -1257,9 +1388,11 @@
     <input type="number" id="gMaxRounds" min="1" max="15" value="15">
     <span class="hint" data-tip="Caps total You.com searches per query. The LLM is told its budget upfront so it can prioritize. Note: if the LLM issues parallel searches in one turn, the actual count may slightly exceed this limit.">i</span>
   </div>
+  <button class="info-btn" onclick="toggleQBrowser('g')">Browse questions</button>
   <button id="gRunBtn" onclick="runGrounding()">Run</button>
   <button id="gStopBtn" class="stop-btn" onclick="stopGrounding()" style="display:none">Stop</button>
 </div>
+<div class="qbrowser" id="qbrowser-g"></div>
 
 <div class="status-bar" id="gStatus">
   <span class="spinner"></span>
@@ -1294,9 +1427,11 @@
     <input type="number" id="cMaxRounds" min="1" max="15" value="15">
     <span class="hint" data-tip="Caps total You.com searches per query. The LLM is told its budget upfront so it can prioritize. Note: if the LLM issues parallel searches in one turn, the actual count may slightly exceed this limit.">i</span>
   </div>
+  <button class="info-btn" onclick="toggleQBrowser('c')">Browse questions</button>
   <button id="cRunBtn" onclick="runComparison()">Compare</button>
   <button id="cStopBtn" class="stop-btn" onclick="stopComparison()" style="display:none">Stop</button>
 </div>
+<div class="qbrowser" id="qbrowser-c"></div>
 
 <div class="status-bar" id="cStatus">
   <span class="spinner"></span>
@@ -1463,9 +1598,11 @@
     <input type="number" id="mMaxRounds" min="1" max="15" value="15">
     <span class="hint" data-tip="Caps total You.com searches per query. The LLM is told its budget upfront so it can prioritize. Note: if the LLM issues parallel searches in one turn, the actual count may slightly exceed this limit.">i</span>
   </div>
+  <button class="info-btn" onclick="toggleQBrowser('m')">Browse questions</button>
   <button id="mRunBtn" onclick="runMulti()">Run All</button>
   <button id="mStopBtn" class="stop-btn" onclick="stopMulti()" style="display:none">Stop</button>
 </div>
+<div class="qbrowser" id="qbrowser-m"></div>
 
 <div class="status-bar" id="mStatus">
   <span class="spinner"></span>
@@ -1518,6 +1655,99 @@ async function loadPricing() {
   } catch (e) {
     console.error('Failed to load pricing:', e);
   }
+}
+
+// ─── Question browser ──────────────────────────────────────────────────────
+
+let _qbData = null; // { bench50: [...], retrievalqa: [...] }
+let _qbActiveTab = {}; // prefix → 'bench50' | 'retrievalqa'
+let _qbOpen = {}; // prefix → bool
+
+async function _loadQBData() {
+  if (_qbData) return _qbData;
+  const [r1, r2] = await Promise.all([
+    fetch('/api/questions').then(r => r.json()),
+    fetch('/api/retrievalqa').then(r => r.json()),
+  ]);
+  const bench50 = [];
+  r1.tiers.forEach(tier => {
+    const badgeClass = `tier${tier.tier}`;
+    tier.questions.forEach(q => {
+      bench50.push({ query: q.query, badge: tier.name, badgeClass, sub: q.domain, answer: null });
+    });
+  });
+  const retrievalqa = r2.questions.map(q => ({
+    query: q.question,
+    badge: q.source === 'realtimeqa' ? 'RealTimeQA' : 'FreshQA',
+    badgeClass: q.source === 'realtimeqa' ? 'realtimeqa' : 'freshqa',
+    sub: null,
+    answer: q.answer || null,
+  }));
+  _qbData = { bench50, retrievalqa };
+  return _qbData;
+}
+
+function _renderQBrowser(prefix, filter) {
+  const el = document.getElementById(`qbrowser-${prefix}`);
+  if (!el) return;
+  const tab = _qbActiveTab[prefix] || 'bench50';
+  const items = _qbData ? _qbData[tab] : [];
+  const q = (filter || '').toLowerCase();
+  const filtered = q ? items.filter(i => i.query.toLowerCase().includes(q)) : items;
+
+  const queryInputId = prefix === 'g' ? 'gQuery' : prefix === 'c' ? 'cQuery' : 'mQuery';
+
+  const tabsHtml = `
+    <div class="qbrowser-tabs">
+      <button class="qbrowser-tab ${tab === 'bench50' ? 'active' : ''}" onclick="_switchQBTab('${prefix}','bench50')">
+        Your 50 <span class="count">(50)</span>
+      </button>
+      <button class="qbrowser-tab ${tab === 'retrievalqa' ? 'active' : ''}" onclick="_switchQBTab('${prefix}','retrievalqa')">
+        RetrievalQA <span class="count">(242)</span>
+      </button>
+      <input class="qbrowser-search" type="text" placeholder="Filter questions…" value="${filter || ''}"
+        oninput="_filterQBrowser('${prefix}', this.value)">
+    </div>`;
+
+  const listHtml = filtered.length === 0
+    ? `<div class="qbrowser-empty">No questions match "${filter}"</div>`
+    : filtered.map(i => `
+      <div class="qbrowser-item" onclick="document.getElementById('${queryInputId}').value=${JSON.stringify(i.query)};toggleQBrowser('${prefix}')">
+        <div>
+          <span class="q-badge ${i.badgeClass}">${i.badge}${i.sub ? ' · ' + i.sub : ''}</span>
+          <div style="margin-top:4px">${i.query}</div>
+          ${i.answer ? `<div class="q-answer">Expected: ${i.answer}</div>` : ''}
+        </div>
+      </div>`).join('');
+
+  el.innerHTML = tabsHtml + `<div class="qbrowser-list">${listHtml}</div>`;
+}
+
+function _switchQBTab(prefix, tab) {
+  _qbActiveTab[prefix] = tab;
+  _renderQBrowser(prefix, '');
+}
+
+function _filterQBrowser(prefix, val) {
+  _renderQBrowser(prefix, val);
+}
+
+async function toggleQBrowser(prefix) {
+  const el = document.getElementById(`qbrowser-${prefix}`);
+  if (!el) return;
+  const isOpen = _qbOpen[prefix];
+  if (isOpen) {
+    el.classList.remove('open');
+    _qbOpen[prefix] = false;
+    return;
+  }
+  el.classList.add('open');
+  _qbOpen[prefix] = true;
+  if (!_qbData) {
+    el.innerHTML = `<div class="qbrowser-empty">Loading…</div>`;
+    await _loadQBData();
+  }
+  _renderQBrowser(prefix, '');
 }
 
 async function loadSampleQueries() {
