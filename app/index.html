@@ -660,21 +660,22 @@
   }
   .qbrowser-search:focus { border-color: var(--primary); }
   .qbrowser-list {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-    gap: 6px; max-height: 260px; overflow-y: auto;
+    display: flex; flex-direction: column;
+    max-height: 420px; overflow-y: auto;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: #fff;
   }
   .qbrowser-item {
-    background: #fff; border: 1px solid var(--border);
-    border-radius: 6px; padding: 8px 12px;
-    font-size: 12.5px; color: var(--text);
-    cursor: pointer; line-height: 1.4;
-    display: flex; gap: 8px; align-items: flex-start;
-    transition: border-color 0.12s, background 0.12s;
+    display: flex; align-items: baseline; gap: 10px;
+    padding: 9px 14px; border-bottom: 1px solid var(--border);
+    font-size: 13px; color: var(--text); cursor: pointer; line-height: 1.4;
+    transition: background 0.1s;
   }
-  .qbrowser-item:hover { border-color: var(--primary); background: #f5f3ff; }
+  .qbrowser-item:last-child { border-bottom: none; }
+  .qbrowser-item:hover { background: #f5f3ff; }
   .qbrowser-item .q-badge {
-    flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 2px 6px;
-    border-radius: 4px; margin-top: 1px; text-transform: uppercase; letter-spacing: 0.03em;
+    flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 2px 7px;
+    border-radius: 4px; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap;
   }
   .qbrowser-item .q-badge.tier1 { background: #dcfce7; color: #166534; }
   .qbrowser-item .q-badge.tier2 { background: #fef9c3; color: #854d0e; }
@@ -682,10 +683,12 @@
   .qbrowser-item .q-badge.tier4 { background: #ede9fe; color: #5b21b6; }
   .qbrowser-item .q-badge.realtimeqa { background: #dbeafe; color: #1e40af; }
   .qbrowser-item .q-badge.freshqa { background: #d1fae5; color: #065f46; }
+  .qbrowser-item .q-text { flex: 1; }
   .qbrowser-item .q-answer {
-    font-size: 10.5px; color: var(--muted); margin-top: 3px; font-style: italic;
+    flex-shrink: 0; font-size: 11px; color: var(--muted); font-style: italic; white-space: nowrap;
+    max-width: 260px; overflow: hidden; text-overflow: ellipsis;
   }
-  .qbrowser-empty { font-size: 13px; color: var(--muted); padding: 12px 0; }
+  .qbrowser-empty { font-size: 13px; color: var(--muted); padding: 12px 14px; }
 
   /* ── Code info modal ────────────────────────────────────────── */
   #codeInfoOverlay {
@@ -1662,6 +1665,7 @@ async function loadPricing() {
 let _qbData = null; // { bench50: [...], retrievalqa: [...] }
 let _qbActiveTab = {}; // prefix → 'bench50' | 'retrievalqa'
 let _qbOpen = {}; // prefix → bool
+let _qbFiltered = {}; // prefix → current filtered array
 
 async function _loadQBData() {
   if (_qbData) return _qbData;
@@ -1694,6 +1698,7 @@ function _renderQBrowser(prefix, filter) {
   const items = _qbData ? _qbData[tab] : [];
   const q = (filter || '').toLowerCase();
   const filtered = q ? items.filter(i => i.query.toLowerCase().includes(q)) : items;
+  _qbFiltered[prefix] = filtered;
 
   const queryInputId = prefix === 'g' ? 'gQuery' : prefix === 'c' ? 'cQuery' : 'mQuery';
 
@@ -1711,16 +1716,28 @@ function _renderQBrowser(prefix, filter) {
 
   const listHtml = filtered.length === 0
     ? `<div class="qbrowser-empty">No questions match "${filter}"</div>`
-    : filtered.map(i => `
-      <div class="qbrowser-item" onclick="document.getElementById('${queryInputId}').value=${JSON.stringify(i.query)};toggleQBrowser('${prefix}')">
-        <div>
-          <span class="q-badge ${i.badgeClass}">${i.badge}${i.sub ? ' · ' + i.sub : ''}</span>
-          <div style="margin-top:4px">${i.query}</div>
-          ${i.answer ? `<div class="q-answer">Expected: ${i.answer}</div>` : ''}
-        </div>
+    : filtered.map((i, idx) => `
+      <div class="qbrowser-item" data-idx="${idx}">
+        <span class="q-badge ${i.badgeClass}">${i.badge}${i.sub ? ' · ' + i.sub : ''}</span>
+        <span class="q-text">${i.query}</span>
+        ${i.answer ? `<span class="q-answer">↳ ${i.answer} (2023–24)</span>` : ''}
       </div>`).join('');
 
-  el.innerHTML = tabsHtml + `<div class="qbrowser-list">${listHtml}</div>`;
+  el.innerHTML = tabsHtml + `<div class="qbrowser-list" id="qblist-${prefix}">${listHtml}</div>`;
+
+  const listEl = document.getElementById(`qblist-${prefix}`);
+  if (listEl) {
+    listEl.addEventListener('click', e => {
+      const item = e.target.closest('.qbrowser-item');
+      if (!item) return;
+      const idx = parseInt(item.dataset.idx, 10);
+      const q = (_qbFiltered[prefix] || [])[idx];
+      if (!q) return;
+      const input = document.getElementById(queryInputId);
+      if (input) input.value = q.query;
+      toggleQBrowser(prefix);
+    });
+  }
 }
 
 function _switchQBTab(prefix, tab) {
